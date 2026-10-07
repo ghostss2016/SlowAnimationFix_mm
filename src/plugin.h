@@ -5,8 +5,10 @@
 #include <iserver.h>
 #include <filesystem.h>
 #include <schemasystem/schemasystem.h>
+#include <tier1/convar.h>
 #include "metamod_virtual_hook.h"
 #include "scheduler.h"
+#include "owned_convar.h"
 #include "sdk/player_layout.h"
 #include <atomic>
 #include <map>
@@ -19,11 +21,19 @@
 class IUtilsApi;
 
 class Plugin final : public ISmmPlugin, public IMetamodListener {
+    struct ConVarApi {
+        using Reference = CConVarRef<float>;
+        static bool Available();
+        static std::unique_ptr<Reference> Create(const char* name);
+        static void Register();
+        static void Unregister();
+    };
     using FrameHook = SvarogHooks::Virtual<ISource2Server, void, bool, bool, bool>;
     using StartupHook = SvarogHooks::Virtual<INetworkServerService, void,
         const GameSessionConfiguration_t&, ISource2WorldSession*, const char*>;
     std::unique_ptr<FrameHook> frameHook_;
     std::unique_ptr<StartupHook> startupHook_;
+    slow_animation::OwnedConVarReference<ConVarApi> timelimit_;
     std::atomic<unsigned> callbacks_{0};
     ISource2Server* server_ = nullptr;
     IVEngineServer2* engine_ = nullptr;

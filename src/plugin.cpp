@@ -15,8 +15,6 @@
 Plugin g_Plugin;
 PLUGIN_EXPOSE(Plugin, g_Plugin);
 
-static CConVarRef<float> mp_timelimit("mp_timelimit");
-
 namespace {
 double WallNow() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -26,6 +24,20 @@ struct CallbackScope {
     explicit CallbackScope(std::atomic<unsigned>& count) : active(count) { ++active; }
     ~CallbackScope() { --active; }
 };
+}
+
+bool Plugin::ConVarApi::Available() { return g_pCVar != nullptr; }
+
+std::unique_ptr<Plugin::ConVarApi::Reference> Plugin::ConVarApi::Create(const char* name) {
+    return std::make_unique<Reference>(name);
+}
+
+void Plugin::ConVarApi::Register() { META_CONVAR_REGISTER(FCVAR_NONE); }
+
+void Plugin::ConVarApi::Unregister() {
+    // convar.cpp is linked into this hidden/export-mapped module; this cleans
+    // its own registry, not the provider's engine cvar or another plugin's list.
+    ConVar_Unregister();
 }
 
 bool Plugin::ReadFile(const char* path, std::string& output) {
@@ -54,7 +66,7 @@ bool Plugin::ReadConfiguration() {
     const auto translations = "addons/slow_animation_fix/translations/" + next.language + ".ini";
     if (!ReadFile(translations.c_str(), text) || !slow_animation::ParseEntries(text, messages)) return false;
     for (const auto* key : {"config_invalid", "schema_unavailable", "utils_unavailable",
-                           "hooks_unavailable", "unload_busy", "map_invalid", "reloading", "restoring"})
+                           "hooks_unavailable", "cvar_unavailable", "unload_busy", "map_invalid", "reloading", "restoring"})
         if (!messages.count(key)) return false;
     settings_ = std::move(next);
     messages_ = std::move(messages);
@@ -87,6 +99,11 @@ bool Plugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool) 
         g_SMAPI->Format(error, maxlen, "%s", Message("hooks_unavailable"));
         return false;
     }
+    auto convarLoad = timelimit_.RollbackUnlessCommitted();
+    if (!timelimit_.Acquire("mp_timelimit")) {
+        g_SMAPI->Format(error, maxlen, "%s", Message("cvar_unavailable"));
+        return false;
+    }
     frameHook_ = std::make_unique<FrameHook>(&ISource2Server::GameFrame, this, nullptr, &Plugin::Hook_GameFrame);
     startupHook_ = std::make_unique<StartupHook>(&INetworkServerService::StartupServer, this, nullptr, &Plugin::Hook_StartupServer);
     if (!frameHook_->AddInstance(server_) || !startupHook_->AddInstance(network_)) {
@@ -98,6 +115,7 @@ bool Plugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool) 
     runtime_.Start(settings_, WallNow());
     loaded_ = true;
     g_SMAPI->AddListener(this, this);
+    convarLoad.Commit();
     return true;
 }
 
@@ -177,6 +195,7 @@ bool Plugin::Unload(char* error, size_t maxlen) {
     layout_ = {};
     startupHook_.reset();
     frameHook_.reset();
+    timelimit_.Reset();
     return true;
 }
 
@@ -202,12 +221,11 @@ int Plugin::Backend::HumanCount() const {
 }
 
 std::optional<float> Plugin::Backend::Timelimit() const {
-    return mp_timelimit.IsValidRef() ? std::optional<float>(mp_timelimit.Get()) : std::nullopt;
+    return slow_animation::ReadTimelimit(plugin.timelimit_);
 }
 
 void Plugin::Backend::RestoreTimelimit(float limit) {
-    if (!mp_timelimit.IsValidRef()) return;
-    mp_timelimit.Set(limit);
+    if (!slow_animation::WriteTimelimit(plugin.timelimit_, limit)) return;
     plugin.Log("restoring");
 }
 

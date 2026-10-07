@@ -1,0 +1,9 @@
+{
+  "sourceRepository": "https://github.com/ghostss2016/SlowAnimationFix_mm.git",
+  "sourceBranch": "main",
+  "sourceCommit": "5e8a1b54a85639e0c14b0085c1145cdeb4e48315",
+  "sourcePath": "README.md",
+  "preservedPath": "docs/provenance/README.api18-before-convar-review.md",
+  "sha256": "ba1aee38458d09be4d3c6892c07c1bd0215c5d329fe751d229b5355d9733ac6b",
+  "reason": "Preserved before documenting the owned current-SDK ConVar registration and rollback lifecycle."
+}

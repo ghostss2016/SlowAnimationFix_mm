@@ -1,5 +1,7 @@
 #include "../src/scheduler.h"
 #include "../src/sdk/player_layout.h"
+#include "../src/owned_convar.h"
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -23,6 +25,143 @@ struct Backend {
     void RestoreTimelimit(float value) { restored.push_back(value); limit = value; }
     void Reload(const char* map) { reloads.emplace_back(map); if (onReload) onReload(); }
 };
+
+// Model the actual SDK contract: construction queues a live reference pointer,
+// RegisterAll makes it usable, UnregisterAll invalidates and releases the list.
+// This replaces only the SDK boundary, not the production owner/read/write code.
+struct ConVarRegistry {
+    bool available = true, registrationSucceeds = true, registered = false;
+    int created = 0, destroyed = 0, registers = 0, unregisters = 0;
+    float value = 60;
+    std::vector<std::string> events;
+    struct Reference;
+    std::vector<Reference*> entries;
+    struct Reference {
+        ConVarRegistry& registry;
+        bool valid = false;
+        explicit Reference(ConVarRegistry& state, const char* name) : registry(state) {
+            assert(state.available && !state.registered);
+            assert(std::string(name) == "mp_timelimit");
+            ++state.created;
+            state.events.emplace_back("create");
+            state.entries.push_back(this);
+        }
+        ~Reference() {
+            assert(!valid);
+            assert(std::find(registry.entries.begin(), registry.entries.end(), this) == registry.entries.end());
+            ++registry.destroyed;
+            registry.events.emplace_back("destroy");
+        }
+        bool IsValidRef() const { return valid; }
+        float Get() const { assert(valid); return registry.value; }
+        void Set(float value) { assert(valid); registry.value = value; }
+    };
+    void Register() {
+        assert(available && !registered && entries.size() == 1);
+        ++registers;
+        events.emplace_back("register");
+        registered = true;
+        for (auto* entry : entries) entry->valid = registrationSucceeds;
+    }
+    void Unregister() {
+        assert(available && registered && entries.size() == 1);
+        ++unregisters;
+        events.emplace_back("unregister");
+        for (auto* entry : entries) entry->valid = false;
+        entries.clear();
+        registered = false;
+    }
+};
+
+struct ConVarApi {
+    using Reference = ConVarRegistry::Reference;
+    ConVarRegistry* registry = nullptr;
+    bool Available() const { return registry && registry->available; }
+    std::unique_ptr<Reference> Create(const char* name) {
+        return std::make_unique<Reference>(*registry, name);
+    }
+    void Register() { registry->Register(); }
+    void Unregister() { registry->Unregister(); }
+};
+
+using OwnedTimelimit = slow_animation::OwnedConVarReference<ConVarApi>;
+
+static void ConVarOwnershipAndRegistration() {
+    ConVarRegistry missing;
+    missing.available = false;
+    OwnedTimelimit unavailable(ConVarApi{&missing});
+    assert(!unavailable.Acquire("mp_timelimit"));
+    assert(!slow_animation::ReadTimelimit(unavailable));
+    assert(!slow_animation::WriteTimelimit(unavailable, 30));
+    assert(missing.created == 0 && missing.registers == 0 && missing.unregisters == 0);
+
+    ConVarRegistry rejected;
+    rejected.registrationSucceeds = false;
+    OwnedTimelimit invalid(ConVarApi{&rejected});
+    assert(!invalid.Acquire("mp_timelimit"));
+    invalid.Reset(); // cleanup is idempotent after a registration failure
+    assert(!slow_animation::ReadTimelimit(invalid));
+    assert(rejected.entries.empty() && rejected.destroyed == 1 && rejected.unregisters == 1);
+    assert((rejected.events == std::vector<std::string>{"create", "register", "unregister", "destroy"}));
+
+    ConVarRegistry provider;
+    OwnedTimelimit timelimit(ConVarApi{&provider});
+    {
+        auto failedLoad = timelimit.RollbackUnlessCommitted();
+        assert(timelimit.Acquire("mp_timelimit"));
+        assert(slow_animation::ReadTimelimit(timelimit) == 60);
+        // A later hook/setup failure returns without committing, just like Load.
+    }
+    assert(provider.destroyed == 1 && provider.unregisters == 1 && provider.entries.empty());
+    assert(!slow_animation::WriteTimelimit(timelimit, 20));
+
+    // Another module owns a separate registry; this owner's cleanup must not
+    // unregister its reference or mutate the engine value through that module.
+    ConVarRegistry otherModule;
+    OwnedTimelimit other(ConVarApi{&otherModule});
+    assert(other.Acquire("mp_timelimit"));
+    {
+        auto loaded = timelimit.RollbackUnlessCommitted();
+        assert(timelimit.Acquire("mp_timelimit"));
+        loaded.Commit();
+    }
+    assert(!timelimit.Acquire("mp_timelimit")); // no repeated registrations
+    assert(provider.created == 2 && provider.registers == 2 && provider.unregisters == 1);
+
+    struct RegisteredBackend : Backend {
+        OwnedTimelimit& owner;
+        explicit RegisteredBackend(OwnedTimelimit& ref) : owner(ref) {}
+        std::optional<float> Timelimit() const { return slow_animation::ReadTimelimit(owner); }
+        void RestoreTimelimit(float value) {
+            assert(slow_animation::WriteTimelimit(owner, value));
+            restored.push_back(value);
+        }
+    } engine(timelimit);
+    scheduler::Runtime runtime;
+    assert(runtime.Start(settings, 0));
+    runtime.MapStart("de_dust2", 0);
+    runtime.Frame(1800, engine);
+    runtime.MapShutdown();
+    runtime.MapStart("de_dust2", 1800);
+    runtime.Frame(1800.01, engine);
+    assert(provider.value == 30 && engine.restored.size() == 1);
+    // Refused/busy unload performs no Reset, so the reference stays usable.
+    assert(slow_animation::ReadTimelimit(timelimit) == 30 && provider.unregisters == 1);
+    runtime.Shutdown();
+    timelimit.Reset(); // successful Unload runs after callbacks/hooks are gone
+    timelimit.Reset();
+    assert(provider.unregisters == 2 && provider.destroyed == 2 && provider.entries.empty());
+    assert(otherModule.registered && otherModule.unregisters == 0 && slow_animation::ReadTimelimit(other) == 60);
+    {
+        OwnedTimelimit nextLifetime(ConVarApi{&provider});
+        assert(nextLifetime.Acquire("mp_timelimit"));
+    } // last-resort owner destruction has the same unregister-before-destroy order
+    assert(provider.unregisters == 3 && provider.destroyed == 3 && provider.entries.empty());
+    for (std::size_t index = 0; index < provider.events.size(); index += 4) {
+        assert(provider.events[index] == "create" && provider.events[index + 1] == "register");
+        assert(provider.events[index + 2] == "unregister" && provider.events[index + 3] == "destroy");
+    }
+}
 
 static void ClockAndCadence() {
     scheduler::Runtime runtime;
@@ -192,6 +331,7 @@ static void OrdinaryAndWorkshopMaps() {
 }
 
 int main() {
+    ConVarOwnershipAndRegistration();
     ClockAndCadence();
     TimelimitAndMapGenerations();
     DependencyAndUnload();

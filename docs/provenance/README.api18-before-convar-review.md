@@ -29,12 +29,6 @@ map, another startup generation, dependency unload/pause or plugin unload cancel
 the pending restoration. A rejected map change expires at the next normal check,
 allowing one fresh attempt without multiplying timers.
 
-The `mp_timelimit` reference is constructed only after obtaining `ICvar`, before
-the official `META_CONVAR_REGISTER` call. Its module-local SDK registration is
-rolled back on a later load failure and unregistered before destroying the
-reference on unload. Other modules' registrations and the engine cvar remain
-owned by their providers; there is no static unregistered reference.
-
 The entity system is borrowed only from `IUtilsApi::GetCGameEntitySystem` during
 a check. The provider's MetaMod owner is tracked and invalidated on unload/pause;
 no entity-service offsets or retained entity pointers are used. The two typed
@@ -81,10 +75,7 @@ the active workflows directory solely for provenance; do not activate it.
 `tests/api18_hook_contract_test.py` is a compiler-free policy guard. The native
 `tests/slow_animation_runtime_test.cpp` links the production `src/scheduler.cpp`
 and tests clock/cadence, human/unknown snapshots, remaining timelimit, duplicate
-events, map generations, dependency loss, unload and config/schema safety. It
-also tests the production ConVar owner and read/write boundary: delayed creation,
-registration/cleanup order, failed-load rollback, separate module lifetimes and
-remaining-limit restoration through the registered reference. Run
+events, map generations, dependency loss, unload and config/schema safety. Run
 it with ASan/UBSan only through central CI; it does not compile engine hooks or
 prove gameplay/native ABI correctness. Native plugin build and a separately
 authorized game test remain distinct from source guards or package creation.

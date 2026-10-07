@@ -9,6 +9,32 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Api18SourceContract(unittest.TestCase):
+    def test_owned_convar_registration_and_load_rollback(self):
+        source = (ROOT / "src/plugin.cpp").read_text()
+        header = (ROOT / "src/plugin.h").read_text()
+        owner = (ROOT / "src/owned_convar.h").read_text()
+        self.assertNotIn("static CConVarRef<float>", source)
+        self.assertIn("OwnedConVarReference<ConVarApi> timelimit_", header)
+        self.assertIn("return g_pCVar != nullptr", source)
+        self.assertIn("META_CONVAR_REGISTER(FCVAR_NONE)", source)
+        self.assertIn("ConVar_Unregister();", source)
+        self.assertIn("slow_animation::ReadTimelimit(plugin.timelimit_)", source)
+        self.assertIn("slow_animation::WriteTimelimit(plugin.timelimit_, limit)", source)
+        self.assertLess(owner.index("!api_.Available()"), owner.index("api_.Create(name)"))
+        self.assertLess(owner.index("api_.Create(name)"), owner.index("api_.Register()"))
+        self.assertLess(owner.index("api_.Unregister()"), owner.index("reference_.reset()"))
+        load = source.split("bool Plugin::Load(", 1)[1].split("void Plugin::BindUtils()", 1)[0]
+        self.assertLess(load.index("g_pCVar, ICvar"), load.index('timelimit_.Acquire("mp_timelimit")'))
+        self.assertLess(load.index("timelimit_.RollbackUnlessCommitted()"), load.index('timelimit_.Acquire("mp_timelimit")'))
+        self.assertLess(load.index('timelimit_.Acquire("mp_timelimit")'), load.index("frameHook_ ="))
+        self.assertLess(load.index("AddListener(this, this)"), load.index("convarLoad.Commit()"))
+        unload = source.split("bool Plugin::Unload(", 1)[1].split("bool Plugin::Backend::Ready()", 1)[0]
+        self.assertLess(unload.index("callbacks_.load()"), unload.index("timelimit_.Reset()"))
+        self.assertLess(unload.index("frameHook_.reset()"), unload.index("timelimit_.Reset()"))
+        for language in ("en", "ru"):
+            translations = (ROOT / "configs/addons/slow_animation_fix/translations" / (language + ".ini")).read_text()
+            self.assertIn("cvar_unavailable =", translations)
+
     def test_explicit_pinned_khook_include(self):
         ambuild = (ROOT / "AMBuildScript").read_text()
         cmake = (ROOT / "makefiles/shared.cmake").read_text()
