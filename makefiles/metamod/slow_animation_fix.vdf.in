@@ -1,5 +1,5 @@
 "Metamod Plugin"
 {
 	"alias"	"slow_animation_fix"
-	"file"	"addons/slow_animation_fix/bin/${PROJECT_VDF_PLATFORM}/slow_animation_fix"
+	"file"	"addons/slow_animation_fix/slow_animation_fix"
 }

@@ -22,6 +22,11 @@ set(CMAKE_STATIC_LIBRARY_PREFIX "")
 
 set(SOURCESDK ${SOURCESDK_DIR}/${BRANCH})
 set(SOURCESDK_LIB ${SOURCESDK}/lib)
+set(SCHEMA_ROOT "${CMAKE_SOURCE_DIR}/../SchemaEntity" CACHE PATH "Pinned SchemaEntity")
+set(UTILS_ROOT "${CMAKE_SOURCE_DIR}/../cs2-menus-new-fixed" CACHE PATH "Pinned cs2-utils")
+if(NOT EXISTS "${SCHEMA_ROOT}/metamod_virtual_hook.h" OR NOT EXISTS "${UTILS_ROOT}/include/menus.h")
+    message(FATAL_ERROR "Pinned SchemaEntity and cs2-utils headers are required")
+endif()
 
 add_definitions(-DMETA_IS_SOURCE2 -D_ITERATOR_DEBUG_LEVEL=0)
 
@@ -60,17 +65,10 @@ include_directories(
     ${SOURCESDK}/public/game/server
     ${SOURCESDK}/public/schemasystem
     ${METAMOD_DIR}/core
-    # NOT ${METAMOD_DIR}/core/sourcehook: this plugin brings its own private
-    # SourceHook (vendor/sourcehook submodule), decoupled from whatever
-    # sourcehook version metamod.so on the target server was built against.
-    # Its include dirs come from the add_subdirectory(vendor/sourcehook)
-    # target in CMakeLists.txt (PUBLIC, so nothing to list here), including
-    # the shim that keeps metamod's own ISmmPlugin.h
-    # `#include "sourcehook.h"` resolving -- to our copy. See src/plugin.h's
-    # include of sourcehook/sourcehook_metamod_override.h.
-    ${CMAKE_SOURCE_DIR}/vendor
-    ${CMAKE_SOURCE_DIR}/vendor/dynlibutils/include
-    ${CMAKE_SOURCE_DIR}/vendor/dynlibutils/include/dynlibutils
+    ${METAMOD_DIR}/core/sourcehook
+    ${METAMOD_DIR}/third_party/khook/include
+    ${SCHEMA_ROOT}
+    ${UTILS_ROOT}/include
 )
 
 include(${CMAKE_CURRENT_LIST_DIR}/metamod/configure_metamod.cmake)

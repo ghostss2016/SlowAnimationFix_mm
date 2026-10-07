@@ -53,6 +53,14 @@ class MMSPluginConfig(object):
     self.sdk_targets = []
     self.binaries = []
     self.mms_root = mms_root
+    self.schema_root = os.path.abspath(builder.options.schema_root or
+        os.path.join(builder.sourcePath, '..', 'SchemaEntity'))
+    self.utils_root = os.path.abspath(builder.options.utils_root or
+        os.path.join(builder.sourcePath, '..', 'cs2-menus-new-fixed'))
+    if not os.path.isfile(os.path.join(self.schema_root, 'metamod_virtual_hook.h')):
+      raise Exception('Missing pinned SchemaEntity/metamod_virtual_hook.h')
+    if not os.path.isfile(os.path.join(self.utils_root, 'include', 'menus.h')):
+      raise Exception('Missing pinned cs2-utils/include/menus.h')
     self.all_targets = []
     self.target_archs = set()
 
@@ -258,15 +266,11 @@ class MMSPluginConfig(object):
     cxx.cxxincludes += [
       os.path.join(context.currentSourcePath),
       os.path.join(mms_core_path),
-      # NOT os.path.join(mms_core_path, 'sourcehook'): this plugin brings its
-      # own private SourceHook (vendor/sourcehook submodule), decoupled from
-      # whatever sourcehook version metamod.so on the target server was built
-      # with. AddPublicIncludes() below covers every header a consumer needs,
-      # including the shim that keeps metamod's own ISmmPlugin.h
-      # `#include "sourcehook.h"` resolving -- to our copy.
+      os.path.join(mms_core_path, 'sourcehook'),
+      os.path.join(self.mms_root, 'third_party', 'khook', 'include'),
+      self.schema_root,
+      os.path.join(self.utils_root, 'include'),
     ]
-
-    self.sourcehook_lib['config'].AddPublicIncludes(binary)
 
     defines = []
     for other_sdk in self.sdk_manifests:
@@ -288,9 +292,6 @@ class MMSPluginConfig(object):
 MMSPlugin = MMSPluginConfig()
 MMSPlugin.detectSDKs()
 MMSPlugin.configure()
-
-MMSPlugin.sourcehook_lib = builder.Build('vendor/sourcehook/AMBuildScript', {})
-MMSPlugin.dynlibutils_lib = builder.Build('vendor/dynlibutils/AMBuildScript', {})
 
 BuildScripts = [
   'AMBuilder',

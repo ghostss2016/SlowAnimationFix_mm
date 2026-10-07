@@ -1,0 +1,10 @@
+{
+  "sourceRepository": "https://github.com/ghostss2016/SlowAnimationFix_mm.git",
+  "sourceBranch": "main",
+  "baseCommit": "efdf3748c6d52202f59985684f84f8c9d603383a",
+  "sourceState": "Uncommitted API18 working changes before the package/include review",
+  "sourcePath": "README.md",
+  "preservedPath": "docs/provenance/README.api18-before-package-review.md",
+  "sha256": "6d12261d600565ddb20a9233691b599141aa81974c55237e0d1732529ee9fb1c",
+  "reason": "Preserved before correcting canonical package/addons collection and documenting explicit KHook includes."
+}

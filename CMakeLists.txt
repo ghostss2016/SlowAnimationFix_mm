@@ -15,21 +15,10 @@ else()
     message(FATAL_ERROR "Environment variable MMSOURCE_DEV is not set!")
 endif()
 
-if(DEFINED ENV{CSGO_PROTO})
-    set(CSGO_PROTO_DIR $ENV{CSGO_PROTO})
-else()
-    message(FATAL_ERROR "Environment variable CSGO_PROTO is not set!")
-endif()
+set(SDK_PROTO_DIR "${SOURCESDK_DIR}/common")
 
 include(makefiles/shared.cmake)
 include(makefiles/protobuf.cmake)
-
-# This plugin's own private SourceHook, not metamod's shared one -- see
-# makefiles/shared.cmake and src/plugin.h. Its own test suite stays out of
-# this build.
-set(SOURCEHOOK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(vendor/sourcehook)
-add_subdirectory(vendor/dynlibutils)
 
 file(GLOB_RECURSE SOURCE_FILES
     src/*.cpp
@@ -79,13 +68,13 @@ if (LINUX)
     include(${CMAKE_SOURCE_DIR}/makefiles/linux.base.cmake)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         PREFIX ""
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/addons/slow_animation_fix/bin/linuxsteamrt64"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/addons/slow_animation_fix"
     )
 elseif (WIN32)
     include(${CMAKE_SOURCE_DIR}/makefiles/windows.base.cmake)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         PREFIX ""
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/addons/slow_animation_fix/bin/win64"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/addons/slow_animation_fix"
     )
 endif()
 

@@ -1,4 +1,6 @@
-name: Continuous Integration
+# Historical cloud workflow retained only as provenance. Never activate it:
+# builds are requested through panel .238 and central cs2-ci on .100.
+name: Continuous Integration (retired)
 
 on:
   push:

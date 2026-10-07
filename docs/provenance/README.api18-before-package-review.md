@@ -11,8 +11,8 @@ to another plugin or create a second Workshop addon.
 
 At map startup the owned post hook snapshots a validated map name, resolves the
 three player schema fields and loads settings/translations. Every configured
-interval (1800 seconds in the supplied config), one check visits at most
-`ABSOLUTE_PLAYER_LIMIT` controller slots (64 in the pinned SDK) and stops on the first connected human. Bots and GOTV
+interval (1800 seconds in the supplied config), one check visits at most the
+SDK's 64 controller slots and stops on the first connected human. Bots and GOTV
 are ignored. Missing Utils, entity system, globals or schema prevents a reload.
 
 An empty ordinary map reloads through `IVEngineServer2::ChangeLevel`; a Workshop
@@ -44,8 +44,6 @@ addons/slow_animation_fix/slow_animation_fix.so
 addons/metamod/slow_animation_fix.vdf
 ```
 
-AMBuild produces `build/package/addons`, matching the central collector's
-`_cibuild/package/addons` contract. It does not add a top-level `cs2/` directory.
 The package also contains `addons/slow_animation_fix/slow_animation_fix.ini`,
 the `translations/en.ini` and `translations/ru.ini` files and the license.
 Settings are actually read at load and map start:
@@ -66,9 +64,7 @@ objects are never dereferenced. The schema layouts are renewed at map start.
 Request builds through panel `.238` and the central `cs2-ci` runner on `.100`.
 The AMBuild recipe uses the pinned SDK/MetaMod, `SchemaEntity` and `cs2-utils`
 headers. It accepts `--schema-root` and `--utils-root`, with the standard sibling
-workspace defaults. Both existing recipes explicitly include the pinned MetaMod
-`third_party/khook/include`; the SDK helper supplies only SDK include paths.
-Private SourceHook/DynLibUtils are removed from the actual
+workspace defaults. Private SourceHook/DynLibUtils are removed from the actual
 build and submodule fetch paths. The former cloud workflow is retained outside
 the active workflows directory solely for provenance; do not activate it.
 

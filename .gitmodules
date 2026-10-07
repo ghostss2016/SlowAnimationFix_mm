@@ -1,7 +1,2 @@
-[submodule "vendor/sourcehook"]
-	path = vendor/sourcehook
-	url = https://github.com/SlynxCZ/SourceHook.git
-[submodule "vendor/dynlibutils"]
-	path = vendor/dynlibutils
-	url = https://github.com/SlynxCZ/DynLibUtils.git
-	branch = main
+# The API18 fork uses official MetaMod KHook and the shared Utils API.
+# Retained historical gitlinks are never fetched or included by build recipes.

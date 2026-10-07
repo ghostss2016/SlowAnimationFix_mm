@@ -1,162 +1,78 @@
 #include "scheduler.h"
 
-#include <algorithm>
-#include <chrono>
+namespace scheduler {
 
-double g_dUniversalTime = 0.0;
-static double s_dLastTickTime = 0.0;
-static double s_dTimerNextThink = 0.0;
-
-static std::vector<Timer*> s_onceTimers;
-static std::vector<Timer*> s_repeatTimers;
-static std::mutex s_nextFrameMutex;
-static std::queue<std::function<void()>> s_nextFrameQueue;
-
-namespace scheduler
-{
-    void Init()
-    {
-        g_dUniversalTime = 0.0;
-        s_dLastTickTime = 0.0;
-        s_dTimerNextThink = 0.0;
+void Runtime::Advance(double wallNow) {
+    if (!std::isfinite(wallNow)) return;
+    if (!clockStarted_) {
+        lastWall_ = wallNow;
+        clockStarted_ = true;
+        return;
     }
-
-    void Shutdown()
-    {
-        for (auto* t : s_onceTimers) delete t;
-        for (auto* t : s_repeatTimers) delete t;
-        s_onceTimers.clear();
-        s_repeatTimers.clear();
-
-        std::lock_guard lock(s_nextFrameMutex);
-        std::queue<std::function<void()>> empty;
-        std::swap(s_nextFrameQueue, empty);
-    }
-
-    void NextFrame(std::function<void()> task)
-    {
-        std::lock_guard lock(s_nextFrameMutex);
-        s_nextFrameQueue.emplace(std::move(task));
-    }
-
-    Timer* AddTimer(float interval, std::function<void()> callback, int flags)
-    {
-        Timer* timer = new Timer(interval, g_dUniversalTime + interval, std::move(callback), flags);
-        if (flags & TIMER_FLAG_REPEAT)
-            s_repeatTimers.push_back(timer);
-        else
-            s_onceTimers.push_back(timer);
-        return timer;
-    }
-
-    void KillTimer(Timer* timer)
-    {
-        if (!timer) return;
-
-        if (timer->InExec)
-        {
-            timer->KillMe = true;
-            return;
-        }
-
-        auto kill = [](std::vector<Timer*>& list, Timer* target)
-        {
-            auto it = std::remove_if(list.begin(), list.end(), [=](Timer* t) { return t == target; });
-            if (it != list.end())
-            {
-                delete target;
-                list.erase(it, list.end());
-            }
-        };
-
-        if (timer->Flags & TIMER_FLAG_REPEAT)
-            kill(s_repeatTimers, timer);
-        else
-            kill(s_onceTimers, timer);
-    }
-
-    void Tick(bool simulating)
-    {
-        // Drain next-frame queue
-        std::queue<std::function<void()>> local;
-        {
-            std::lock_guard lock(s_nextFrameMutex);
-            std::swap(local, s_nextFrameQueue);
-        }
-        while (!local.empty())
-        {
-            try { local.front()(); }
-            catch (...)
-            {
-            }
-            local.pop();
-        }
-
-        double now = std::chrono::duration_cast<std::chrono::duration<double>>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
-
-        if (simulating)
-            g_dUniversalTime += now - s_dLastTickTime;
-        else
-            g_dUniversalTime += 0.015;
-        s_dLastTickTime = now;
-
-        if (g_dUniversalTime < s_dTimerNextThink)
-            return;
-
-        for (int i = static_cast<int>(s_onceTimers.size()) - 1; i >= 0; --i)
-        {
-            Timer* t = s_onceTimers[i];
-            if (g_dUniversalTime >= t->ExecTime)
-            {
-                t->InExec = true;
-                try { t->Callback(); }
-                catch (...)
-                {
-                }
-                delete t;
-                s_onceTimers.erase(s_onceTimers.begin() + i);
-            }
-        }
-
-        for (int i = static_cast<int>(s_repeatTimers.size()) - 1; i >= 0; --i)
-        {
-            Timer* t = s_repeatTimers[i];
-            if (g_dUniversalTime >= t->ExecTime)
-            {
-                t->InExec = true;
-                try { t->Callback(); }
-                catch (...)
-                {
-                }
-                if (t->KillMe)
-                {
-                    delete t;
-                    s_repeatTimers.erase(s_repeatTimers.begin() + i);
-                    continue;
-                }
-                t->InExec = false;
-                t->ExecTime = g_dUniversalTime + t->Interval;
-            }
-        }
-
-        s_dTimerNextThink = g_dUniversalTime + 0.1;
-    }
-
-    void RemoveMapChangeTimers()
-    {
-        auto remove = [](std::vector<Timer*>& list)
-        {
-            for (int i = static_cast<int>(list.size()) - 1; i >= 0; --i)
-            {
-                if (list[i]->Flags & TIMER_FLAG_NO_MAPCHANGE)
-                {
-                    delete list[i];
-                    list.erase(list.begin() + i);
-                }
-            }
-        };
-        remove(s_onceTimers);
-        remove(s_repeatTimers);
-    }
+    // Never turn the first steady_clock sample into server uptime; ignore
+    // reversed samples without counting that interval twice on recovery.
+    if (wallNow < lastWall_) return;
+    now_ += wallNow - lastWall_;
+    lastWall_ = wallNow;
 }
+
+bool Runtime::Start(const slow_animation::Settings& settings, double wallNow) {
+    if (!slow_animation::Valid(settings) || !std::isfinite(wallNow)) return false;
+    if (running_) return true; // duplicate AllPluginsLoaded cannot add timers
+    Shutdown();
+    settings_ = settings;
+    running_ = true;
+    Advance(wallNow);
+    nextCheck_ = settings_.reloadIntervalSeconds;
+    return true;
+}
+
+void Runtime::Reconfigure(const slow_animation::Settings& settings) {
+    if (!slow_animation::Valid(settings)) return;
+    const bool intervalChanged = settings_.reloadIntervalSeconds != settings.reloadIntervalSeconds;
+    settings_ = settings;
+    if (running_ && intervalChanged) nextCheck_ = now_ + settings_.reloadIntervalSeconds;
+}
+
+void Runtime::Shutdown() {
+    running_ = clockStarted_ = awaitingReload_ = false;
+    lastWall_ = now_ = nextCheck_ = mapStart_ = 0;
+    ++generation_;
+    map_.clear();
+    reloadMap_.clear();
+    pendingLimit_.reset();
+    restoreLimit_.reset();
+}
+
+void Runtime::DependencyLost() {
+    ++generation_;
+    awaitingReload_ = false;
+    pendingLimit_.reset();
+    restoreLimit_.reset();
+    reloadMap_.clear();
+}
+
+void Runtime::MapStart(const char* map, double wallNow) {
+    Advance(wallNow);
+    ++generation_;
+    restoreLimit_.reset();
+    const std::string next = map ? map : "";
+    if (awaitingReload_ && now_ <= nextCheck_ && next == reloadMap_ && pendingLimit_) {
+        restoreLimit_ = pendingLimit_;
+        restoreGeneration_ = generation_;
+    }
+    awaitingReload_ = false;
+    pendingLimit_.reset();
+    reloadMap_.clear();
+    map_ = next;
+    mapStart_ = now_;
+}
+
+void Runtime::MapShutdown() {
+    ++generation_;
+    map_.clear();
+    restoreLimit_.reset();
+    // Keep pendingLimit_ only for our expected self-reload StartupServer.
+}
+
+} // namespace scheduler

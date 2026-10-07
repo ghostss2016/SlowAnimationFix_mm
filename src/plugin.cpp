@@ -1,233 +1,227 @@
 // Author: Michal Přikryl (Slynx) <github.com/SlynxCZ>
-
+// SVAROG fork: official MetaMod API18, checked schema and owned lifecycle.
 #include "plugin.h"
-#include "scheduler.h"
-#include "utils.hpp"
-
-#include "CBasePlayerController.h"
-
-#include "memaddr.hpp"
-#include "module.hpp"
-
-#include "eiface.h"
-#include "entitysystem.h"
-#include "icvar.h"
-#include "iserver.h"
-#include "interfaces/interfaces.h"
-#include "tier1/convar.h"
-
+#include <variant.h>
+#include <const.h>
+#include <vector>
+#include <menus.h> // canonical cs2-utils/include/menus.h, unchanged IUtilsApi ABI
+#include <entitysystem.h>
+#include <icvar.h>
+#include <interfaces/interfaces.h>
+#include <tier1/convar.h>
+#include <chrono>
 #include <cstdio>
-#include <tier0/dbg.h>
-
-#define VERSION_STRING SEMVER " @ " GITHUB_SHA
-#define BUILD_TIMESTAMP __DATE__ " " __TIME__
-
-using namespace DynLibUtils;
 
 Plugin g_Plugin;
 PLUGIN_EXPOSE(Plugin, g_Plugin);
 
-// Snapshot of the current map name, taken at StartupServer (map start)
-char g_szMap[256] = "";
+static CConVarRef<float> mp_timelimit("mp_timelimit");
 
-CConVarRef<float> mp_timelimit("mp_timelimit");
-
-// Universal time at map start, used to compute how much of the timelimit already elapsed
-double g_dMapStartUniversalTime = 0.0;
-// Remaining timelimit (minutes) to restore after an empty-server reload; < 0 = nothing pending
-float g_fPendingTimelimitAdjust = -1.0f;
-
-// Reference plugin reloads the map every 30 minutes when the server is empty
-constexpr float MAP_RELOAD_INTERVAL = 1800.0f;
-
-void OnMapReloadTimer();
-
-class GameSessionConfiguration_t
-{
+namespace {
+double WallNow() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+struct CallbackScope {
+    std::atomic<unsigned>& active;
+    explicit CallbackScope(std::atomic<unsigned>& count) : active(count) { ++active; }
+    ~CallbackScope() { --active; }
 };
+}
 
-SH_DECL_HOOK3_void(ISource2Server, GameFrame, SH_NOATTRIB, 0, bool, bool, bool);
-SH_DECL_HOOK3_void(INetworkServerService, StartupServer, SH_NOATTRIB, 0, const GameSessionConfiguration_t&, ISource2WorldSession*, const char*);
+bool Plugin::ReadFile(const char* path, std::string& output) {
+    if (!filesystem_) return false;
+    const auto file = filesystem_->Open(path, "r", "GAME");
+    if (file == FILESYSTEM_INVALID_HANDLE) return false;
+    const auto size = filesystem_->Size(file);
+    if (!size || size > 65536) {
+        filesystem_->Close(file);
+        return false;
+    }
+    std::string text(size, '\0');
+    const int read = filesystem_->Read(text.data(), static_cast<int>(size), file);
+    filesystem_->Close(file);
+    if (read != static_cast<int>(size)) return false;
+    output = std::move(text);
+    return true;
+}
 
-bool Plugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late)
-{
-    PLUGIN_SAVEVARS();
-    SH_METAMOD_OVERRIDE_SAVEVARS(id);
+bool Plugin::ReadConfiguration() {
+    std::string text;
+    slow_animation::Settings next;
+    if (!ReadFile("addons/slow_animation_fix/slow_animation_fix.ini", text) ||
+        !slow_animation::ParseSettings(text, next)) return false;
+    std::map<std::string, std::string> messages;
+    const auto translations = "addons/slow_animation_fix/translations/" + next.language + ".ini";
+    if (!ReadFile(translations.c_str(), text) || !slow_animation::ParseEntries(text, messages)) return false;
+    for (const auto* key : {"config_invalid", "schema_unavailable", "utils_unavailable",
+                           "hooks_unavailable", "unload_busy", "map_invalid", "reloading", "restoring"})
+        if (!messages.count(key)) return false;
+    settings_ = std::move(next);
+    messages_ = std::move(messages);
+    runtime_.Reconfigure(settings_);
+    return true;
+}
 
-    GET_V_IFACE_CURRENT(GetServerFactory, g_pSource2Server, ISource2Server, INTERFACEVERSION_SERVERGAMEDLL);
-    GET_V_IFACE_CURRENT(GetEngineFactory, g_pEngineServer, IVEngineServer2, SOURCE2ENGINETOSERVER_INTERFACE_VERSION);
-    GET_V_IFACE_CURRENT(GetEngineFactory, g_pSchemaSystem, ISchemaSystem, SCHEMASYSTEM_INTERFACE_VERSION);
-    GET_V_IFACE_CURRENT(GetEngineFactory, g_pGameResourceServiceServer, IGameResourceService, GAMERESOURCESERVICESERVER_INTERFACE_VERSION);
-    GET_V_IFACE_CURRENT(GetEngineFactory, g_pNetworkServerService, INetworkServerService, NETWORKSERVERSERVICE_INTERFACE_VERSION);
+const char* Plugin::Message(const char* key) const {
+    const auto it = messages_.find(key);
+    return it == messages_.end() ? key : it->second.c_str();
+}
+
+void Plugin::Log(const char* key) { META_LOG(this, "%s", Message(key)); }
+
+bool Plugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool) {
+    PLUGIN_SAVEVARS(); // obtains the official API18 KHook interface
+    GET_V_IFACE_CURRENT(GetServerFactory, server_, ISource2Server, INTERFACEVERSION_SERVERGAMEDLL);
+    GET_V_IFACE_CURRENT(GetEngineFactory, engine_, IVEngineServer2, SOURCE2ENGINETOSERVER_INTERFACE_VERSION);
+    GET_V_IFACE_CURRENT(GetEngineFactory, schema_, ISchemaSystem, SCHEMASYSTEM_INTERFACE_VERSION);
+    GET_V_IFACE_CURRENT(GetEngineFactory, network_, INetworkServerService, NETWORKSERVERSERVICE_INTERFACE_VERSION);
+    GET_V_IFACE_CURRENT(GetFileSystemFactory, filesystem_, IFileSystem, FILESYSTEM_INTERFACE_VERSION);
     GET_V_IFACE_CURRENT(GetEngineFactory, g_pCVar, ICvar, CVAR_INTERFACE_VERSION);
-
-    {
-        m_iGameFrameHookID = SH_ADD_HOOK(ISource2Server, GameFrame, g_pSource2Server, SH_MEMBER(this, &Plugin::Hook_GameFrame), true);
-        m_iStartupServerHookID = SH_ADD_HOOK(INetworkServerService, StartupServer, g_pNetworkServerService, SH_MEMBER(this, &Plugin::Hook_StartupServer), true);
+    if (!ReadConfiguration()) {
+        // Bootstrap diagnostic is the key: no implicit mechanic defaults and
+        // no hardcoded fallback language when the package is incomplete.
+        g_SMAPI->Format(error, maxlen, "%s", Message("config_invalid"));
+        return false;
     }
-
-    scheduler::Init();
-
+    if (!KHook::__exported__khook) {
+        g_SMAPI->Format(error, maxlen, "%s", Message("hooks_unavailable"));
+        return false;
+    }
+    frameHook_ = std::make_unique<FrameHook>(&ISource2Server::GameFrame, this, nullptr, &Plugin::Hook_GameFrame);
+    startupHook_ = std::make_unique<StartupHook>(&INetworkServerService::StartupServer, this, nullptr, &Plugin::Hook_StartupServer);
+    if (!frameHook_->AddInstance(server_) || !startupHook_->AddInstance(network_)) {
+        startupHook_.reset();
+        frameHook_.reset();
+        g_SMAPI->Format(error, maxlen, "%s", Message("hooks_unavailable"));
+        return false;
+    }
+    runtime_.Start(settings_, WallNow());
+    loaded_ = true;
     g_SMAPI->AddListener(this, this);
-
     return true;
 }
 
-void Plugin::AllPluginsLoaded()
-{
-    scheduler::AddTimer(MAP_RELOAD_INTERVAL, OnMapReloadTimer, TIMER_FLAG_REPEAT);
+void Plugin::BindUtils() {
+    if (!loaded_ || utils_) return;
+    int result = 0;
+    PluginId owner = 0;
+    auto* api = static_cast<IUtilsApi*>(g_SMAPI->MetaFactory(Utils_INTERFACE, &result, &owner));
+    if (!api || result != META_IFACE_OK || owner <= 0) return;
+    utils_ = api;
+    utilsOwner_ = owner;
 }
 
-bool Plugin::Unload(char* error, size_t maxlen)
-{
-    scheduler::Shutdown();
+void Plugin::AllPluginsLoaded() {
+    BindUtils();
+    if (!utils_) Log("utils_unavailable");
+    // Covers a late load without guessing entity-service memory offsets.
+    if (runtime_.Map().empty()) {
+        auto* game = network_ ? network_->GetIGameServer() : nullptr;
+        if (game && game->GetMapName()) StartMap(game->GetMapName());
+    }
+}
 
-    SH_REMOVE_HOOK_ID(m_iGameFrameHookID);
-    SH_REMOVE_HOOK_ID(m_iStartupServerHookID);
+void Plugin::StartMap(const char* mapName) {
+    if (!ReadConfiguration()) Log("config_invalid"); // retain last valid config
+    layout_ = slow_animation::ResolvePlayerLayout(schema_);
+    if (!layout_.Ready()) Log("schema_unavailable");
+    if (!slow_animation::ValidMap(mapName)) {
+        runtime_.MapStart(nullptr, WallNow());
+        Log("map_invalid");
+        return;
+    }
+    runtime_.MapStart(mapName, WallNow());
+}
 
+KHook::Return<void> Plugin::Hook_GameFrame(ISource2Server*, bool, bool, bool) {
+    CallbackScope scope(callbacks_);
+    Backend backend{*this};
+    runtime_.Frame(WallNow(), backend);
+    return {KHook::Action::Ignore};
+}
+
+KHook::Return<void> Plugin::Hook_StartupServer(INetworkServerService*,
+    const GameSessionConfiguration_t&, ISource2WorldSession*, const char* mapName) {
+    CallbackScope scope(callbacks_);
+    StartMap(mapName);
+    return {KHook::Action::Ignore};
+}
+
+void Plugin::OnPluginLoad(PluginId) { BindUtils(); }
+void Plugin::OnPluginUnpause(PluginId) { BindUtils(); }
+void Plugin::OnPluginPause(PluginId id) { OnPluginUnload(id); }
+
+void Plugin::OnPluginUnload(PluginId id) {
+    if (id != utilsOwner_ || utilsOwner_ == 0) return;
+    // Do not call an unloading provider, retain entity pointers, or leave a
+    // restoration belonging to its previous lifetime queued in our module.
+    utils_ = nullptr;
+    utilsOwner_ = 0;
+    runtime_.DependencyLost();
+}
+
+void Plugin::OnLevelShutdown() {
+    runtime_.MapShutdown();
+    layout_ = {};
+}
+
+bool Plugin::Unload(char* error, size_t maxlen) {
+    if (callbacks_.load() || ((frameHook_ || startupHook_) && !KHook::__exported__khook)) {
+        g_SMAPI->Format(error, maxlen, "%s", Message("unload_busy"));
+        return false;
+    }
+    loaded_ = false;
+    runtime_.Shutdown();
+    utils_ = nullptr;
+    utilsOwner_ = 0;
+    layout_ = {};
+    startupHook_.reset();
+    frameHook_.reset();
     return true;
 }
 
-void Plugin::Hook_GameFrame(bool simulating, bool bFirstTick, bool bLastTick)
-{
-    scheduler::Tick(simulating);
-    RETURN_META(MRES_IGNORED);
+bool Plugin::Backend::Ready() const {
+    return plugin.loaded_ && plugin.utils_ && plugin.engine_ && plugin.layout_.Ready();
 }
 
-void Plugin::Hook_StartupServer(const GameSessionConfiguration_t& config, ISource2WorldSession* pWorldSession, const char* pszMapName)
-{
-    scheduler::RemoveMapChangeTimers();
-
-    V_snprintf(g_szMap, sizeof(g_szMap), "%s", (pszMapName && pszMapName[0]) ? pszMapName : "unknown");
-
-    META_LOG(this, "StartupServer: map snapshot = '%s'\n", g_szMap);
-
-    g_dMapStartUniversalTime = g_dUniversalTime;
-
-    if (g_fPendingTimelimitAdjust >= 0.0f)
-    {
-        float adjusted = g_fPendingTimelimitAdjust;
-        g_fPendingTimelimitAdjust = -1.0f;
-
-        scheduler::NextFrame([adjusted]()
-        {
-            if (!mp_timelimit.IsValidRef())
-                return;
-
-            float value = (adjusted > 0.0f ? adjusted : 0.1f);
-            META_LOG(&g_Plugin, "restoring remaining timelimit -> mp_timelimit %.1f\n", value);
-            mp_timelimit.Set(value);
-        });
+int Plugin::Backend::HumanCount() const {
+    if (!Ready()) return -1;
+    auto* entities = plugin.utils_->GetCGameEntitySystem();
+    auto* globals = plugin.engine_->GetServerGlobals();
+    if (!entities || !globals || globals->maxClients < 0 || globals->maxClients > ABSOLUTE_PLAYER_LIMIT) return -1;
+    // At most 64 controllers, once per configured interval; stop on first
+    // human. No filesystem, network, schema lookup or player scan per tick.
+    for (int slot = 0; slot < globals->maxClients; ++slot) {
+        auto* controller = entities->GetEntityInstance(CEntityIndex(slot + 1));
+        if (!controller) continue;
+        bool human = false;
+        if (!slow_animation::ReadHuman(controller, plugin.layout_, FL_FAKECLIENT, human)) return -1;
+        if (human) return 1;
     }
-
-    RETURN_META(MRES_IGNORED);
+    return 0;
 }
 
-void OnMapReloadTimer()
-{
-    CGameEntitySystem* pEntitySystem = GameEntitySystem();
-    CGlobalVars* pGlobalVars = g_pEngineServer->GetServerGlobals();
-
-    if (!pEntitySystem || !pGlobalVars)
-        return;
-
-    int iPlayers = 0;
-    for (int i = 0; i < pGlobalVars->maxClients; i++)
-	{
-        auto pController = static_cast<CBasePlayerController*>(pEntitySystem->GetEntityInstance(CEntityIndex(i + 1)));
-        if (pController && pController->IsConnected() && !pController->IsBot() && !pController->IsHLTV())
-        {
-            iPlayers++;
-        }
-	}
-
-    META_LOG(&g_Plugin, "reload check: map='%s', human players=%d\n", g_szMap, iPlayers);
-
-    if (!g_szMap[0])
-    {
-        META_LOG(&g_Plugin, "reload skipped: no map snapshot (StartupServer hook did not run?)\n");
-        return;
-    }
-
-    if (iPlayers > 0)
-    {
-        META_LOG(&g_Plugin, "reload skipped: %d human player(s) connected, next check in %.0f s\n", iPlayers, MAP_RELOAD_INTERVAL);
-        return;
-    }
-
-    double elapsedSeconds = g_dUniversalTime - g_dMapStartUniversalTime;
-    float elapsedMinutes = static_cast<float>(elapsedSeconds) / 60.0f;
-
-    float originalTimelimit = 0.0f;
-    if (mp_timelimit.IsValidRef())
-        originalTimelimit = mp_timelimit.Get();
-
-    if (originalTimelimit > 0.0f)
-    {
-        g_fPendingTimelimitAdjust = originalTimelimit - elapsedMinutes;
-        META_LOG(&g_Plugin, "timelimit %.1f min, elapsed %.1f min -> will restore %.1f min after reload\n", originalTimelimit, elapsedMinutes, g_fPendingTimelimitAdjust);
-    }
-
-    if (g_pEngineServer->IsMapValid(g_szMap))
-    {
-        META_LOG(&g_Plugin, "server empty -> ChangeLevel('%s')\n", g_szMap);
-        g_pEngineServer->ChangeLevel(g_szMap, nullptr);
-    }
-    else
-    {
-        char szBuffer[256];
-        V_snprintf(szBuffer, sizeof(szBuffer), "ds_workshop_changelevel %s", g_szMap);
-        META_LOG(&g_Plugin, "server empty, map not valid as regular map -> '%s'\n", szBuffer);
-        g_pEngineServer->ServerCommand(szBuffer);
-    }
+std::optional<float> Plugin::Backend::Timelimit() const {
+    return mp_timelimit.IsValidRef() ? std::optional<float>(mp_timelimit.Get()) : std::nullopt;
 }
 
-///////////////////////////////////////
-
-CGameEntitySystem* GameEntitySystem()
-{
-    // CGameResourceService::SetEntityResourceManifest
-    // str server_entities
-    return *CMemory(g_pGameResourceServiceServer).Offset(WIN_LINUX(0x58, 0x50)).RCast<CGameEntitySystem**>();
+void Plugin::Backend::RestoreTimelimit(float limit) {
+    if (!mp_timelimit.IsValidRef()) return;
+    mp_timelimit.Set(limit);
+    plugin.Log("restoring");
 }
 
-///////////////////////////////////////
-const char* Plugin::GetLicense()
-{
-    return "GPLv3";
+void Plugin::Backend::Reload(const char* map) {
+    if (!Ready() || !slow_animation::ValidMap(map)) return;
+    plugin.Log("reloading");
+    slow_animation::ReloadMap(map, *plugin.engine_);
 }
 
-const char* Plugin::GetVersion()
-{
-    return VERSION_STRING;
-}
-
-const char* Plugin::GetDate()
-{
-    return BUILD_TIMESTAMP;
-}
-
-const char* Plugin::GetLogTag()
-{
-    return "SlowAnimationFix";
-}
-
-const char* Plugin::GetAuthor()
-{
-    return "Slynx (˙·٠● S l y n x ●٠·˙)";
-}
-
-const char* Plugin::GetDescription()
-{
-    return "Slow animation fix";
-}
-
-const char* Plugin::GetName()
-{
-    return "Slow animation fix";
-}
-
-const char* Plugin::GetURL()
-{
-    return "https://slynxdev.cz";
-}
+const char* Plugin::GetLicense() { return "GPLv3"; }
+const char* Plugin::GetVersion() { return "1.1.0-api18 @ " GITHUB_SHA; }
+const char* Plugin::GetDate() { return __DATE__ " " __TIME__; }
+const char* Plugin::GetLogTag() { return "SlowAnimationFix"; }
+const char* Plugin::GetAuthor() { return "Slynx; SVAROG fork"; }
+const char* Plugin::GetDescription() { return "Empty-server animation clock maintenance"; }
+const char* Plugin::GetName() { return "Slow animation fix"; }
+const char* Plugin::GetURL() { return "https://github.com/ghostss2016/SlowAnimationFix_mm"; }

@@ -12,7 +12,6 @@ class SDKPackage:
     self.sdk_name = sdk_name
 
     self.plugin_folder_path = os.path.join(
-      self.sdk_name,
       'addons',
       MMSPlugin.plugin_name
     )
@@ -20,7 +19,6 @@ class SDKPackage:
     self.plugin_folder = builder.AddFolder(self.plugin_folder_path)
 
     self.metamod_path = os.path.join(
-      self.sdk_name,
       'addons',
       'metamod'
     )
@@ -29,29 +27,17 @@ class SDKPackage:
 
     self.addBinFolder(cxx)
     self.generateVDF()
+    self.addFolder('configs')
+    builder.AddCopy(os.path.join(builder.sourcePath, 'LICENSE'),
+                    os.path.join(self.plugin_folder_path, 'LICENSE'))
 
 
   def addBinFolder(self, cxx):
 
-    platform64_path_map = {
-      'windows': 'win64',
-      'linux': 'linuxsteamrt64',
-      'mac': 'osx64'
-    }
-
-    if cxx.target.arch == 'x86_64':
-      self.bin_path = os.path.join(
-        self.plugin_folder_path,
-        'bin',
-        platform64_path_map[cxx.target.platform]
-      )
-    else:
-      self.bin_path = os.path.join(
-        self.plugin_folder_path,
-        'bin'
-      )
-
-    self.bin = builder.AddFolder(self.bin_path)
+    # Match the installed VDF and panel card; never introduce a second
+    # bin/linuxsteamrt64 binary which the active server would not load.
+    self.bin_path = self.plugin_folder_path
+    self.bin = self.plugin_folder
 
 
   def generateVDF(self):
@@ -59,7 +45,7 @@ class SDKPackage:
     vdf = '"Metamod Plugin"\n'
     vdf += '{\n'
     vdf += f'\t"alias"\t"{MMSPlugin.plugin_alias}"\n'
-    vdf += f'\t"file"\t"{os.path.join(os.path.relpath(self.bin_path, self.sdk_name), MMSPlugin.plugin_name)}"\n'
+    vdf += f'\t"file"\t"{os.path.join(self.bin_path, MMSPlugin.plugin_name)}"\n'
     vdf += '}'
 
     builder.AddOutputFile(
@@ -91,9 +77,7 @@ class SDKPackage:
       folder_path = os.path.join(builder.sourcePath, folder_path)
 
     if result_path is None:
-      result_path = self.sdk_name
-    else:
-      result_path = os.path.join(self.sdk_name, result_path)
+      result_path = ''
 
     for root, _, files in os.walk(folder_path):
       for f in files:

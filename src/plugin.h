@@ -1,48 +1,81 @@
-#ifndef _INCLUDE_SLOW_ANIMATION_FIX_PLUGIN_SLYNX_H_
-#define _INCLUDE_SLOW_ANIMATION_FIX_PLUGIN_SLYNX_H_
-#ifdef _WIN32
 #pragma once
+
+#include <ISmmPlugin.h>
+#include <eiface.h>
+#include <iserver.h>
+#include <filesystem.h>
+#include <schemasystem/schemasystem.h>
+#include "metamod_virtual_hook.h"
+#include "scheduler.h"
+#include "sdk/player_layout.h"
+#include <atomic>
+#include <map>
+#include <memory>
+
+#if METAMOD_PLAPI_VERSION < 18
+#error SlowAnimationFix requires the official MetaMod plugin API 18 and KHook
 #endif
 
-#include "inetchannel.h"
-#include "ISmmPlugin.h"
+class IUtilsApi;
 
-// Redirects SH_GLOB_SHPTR/SH_GLOB_PLUGPTR onto a private, plugin-owned
-// SourceHook engine (vendor/sourcehook) instead of metamod's shared
-// g_SHPtr/g_PLID -- must come after ISmmPlugin.h (which is what defines
-// the defaults this overrides) and before any SH_DECL_HOOK*/SH_ADD_*HOOK/
-// SH_DECL_INLINEHOOK* usage. See the header itself for the full rationale
-// and the SH_METAMOD_OVERRIDE_SAVEVARS(id) call this pairs with in Load().
-#include "sourcehook/sourcehook_metamod_override.h"
-#include "iserver.h"
+class Plugin final : public ISmmPlugin, public IMetamodListener {
+    using FrameHook = SvarogHooks::Virtual<ISource2Server, void, bool, bool, bool>;
+    using StartupHook = SvarogHooks::Virtual<INetworkServerService, void,
+        const GameSessionConfiguration_t&, ISource2WorldSession*, const char*>;
+    std::unique_ptr<FrameHook> frameHook_;
+    std::unique_ptr<StartupHook> startupHook_;
+    std::atomic<unsigned> callbacks_{0};
+    ISource2Server* server_ = nullptr;
+    IVEngineServer2* engine_ = nullptr;
+    INetworkServerService* network_ = nullptr;
+    IFileSystem* filesystem_ = nullptr;
+    ISchemaSystem* schema_ = nullptr;
+    IUtilsApi* utils_ = nullptr;
+    PluginId utilsOwner_ = 0;
+    scheduler::Runtime runtime_;
+    slow_animation::Settings settings_;
+    slow_animation::PlayerLayout layout_;
+    std::map<std::string, std::string> messages_;
+    bool loaded_ = false;
 
-class Plugin final : public ISmmPlugin, IMetamodListener
-{
+    bool ReadConfiguration();
+    bool ReadFile(const char* path, std::string& output);
+    void BindUtils();
+    void StartMap(const char* mapName);
+    void Log(const char* key);
+    const char* Message(const char* key) const;
+
+    struct Backend {
+        Plugin& plugin;
+        bool Ready() const;
+        int HumanCount() const;
+        std::optional<float> Timelimit() const;
+        void RestoreTimelimit(float limit);
+        void Reload(const char* map);
+    };
+
 public:
-	bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
-	bool Unload(char* error, size_t maxlen) override;
-	void AllPluginsLoaded() override;
+    bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
+    bool Unload(char* error, size_t maxlen) override;
+    void AllPluginsLoaded() override;
+    void OnPluginLoad(PluginId id) override;
+    void OnPluginUnload(PluginId id) override;
+    void OnPluginPause(PluginId id) override;
+    void OnPluginUnpause(PluginId id) override;
+    void OnLevelShutdown() override;
+    KHook::Return<void> Hook_GameFrame(ISource2Server*, bool, bool, bool);
+    KHook::Return<void> Hook_StartupServer(INetworkServerService*,
+        const GameSessionConfiguration_t&, ISource2WorldSession*, const char*);
 
-private:
-	const char* GetAuthor() override;
-	const char* GetName() override;
-	const char* GetDescription() override;
-	const char* GetURL() override;
-	const char* GetLicense() override;
-	const char* GetVersion() override;
-	const char* GetDate() override;
-	const char* GetLogTag() override;
-
-public:
-	void Hook_GameFrame(bool simulating, bool bFirstTick, bool bLastTick);
-	void Hook_StartupServer(const GameSessionConfiguration_t& config, ISource2WorldSession* pWorldSession, const char* pszMapName);
-
-	int m_iGameFrameHookID;
-	int m_iStartupServerHookID;
+    const char* GetAuthor() override;
+    const char* GetName() override;
+    const char* GetDescription() override;
+    const char* GetURL() override;
+    const char* GetLicense() override;
+    const char* GetVersion() override;
+    const char* GetDate() override;
+    const char* GetLogTag() override;
 };
 
 extern Plugin g_Plugin;
-
 PLUGIN_GLOBALVARS();
-
-#endif // _INCLUDE_SLOW_ANIMATION_FIX_PLUGIN_SLYNX_H_
