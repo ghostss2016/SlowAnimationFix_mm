@@ -6,6 +6,7 @@
 #include <vector>
 #include <menus.h> // canonical cs2-utils/include/menus.h, unchanged IUtilsApi ABI
 #include <entitysystem.h>
+#include <IPluginManager.h>
 #include <icvar.h>
 #include <interfaces/interfaces.h>
 #include <tier1/convar.h>
@@ -14,6 +15,13 @@
 
 Plugin g_Plugin;
 PLUGIN_EXPOSE(Plugin, g_Plugin);
+
+// The SDK entitysystem/entityidentity implementation expects the embedding
+// module to supply this accessor. Resolve it inside this SO through the owned
+// Utils API, not a private engine offset or another plugin's exported symbol.
+CGameEntitySystem* GameEntitySystem() {
+    return g_Plugin.EntitySystem();
+}
 
 namespace {
 double WallNow() {
@@ -129,6 +137,20 @@ void Plugin::BindUtils() {
     utilsOwner_ = owner;
 }
 
+CGameEntitySystem* Plugin::EntitySystem() const {
+    if (!loaded_ || !utils_ || utilsOwner_ <= 0 || !g_SMAPI) return nullptr;
+    auto* manager = static_cast<SourceMM::ISmmPluginManager*>(
+        g_SMAPI->MetaFactory(MMIFACE_PLMANAGER, nullptr, nullptr));
+    SourceMM::Pl_Status status = SourceMM::Pl_NotFound;
+    if (!manager || !manager->Query(utilsOwner_, nullptr, &status, nullptr) || status != SourceMM::Pl_Running)
+        return nullptr;
+    int result = 0;
+    PluginId owner = 0;
+    auto* current = static_cast<IUtilsApi*>(g_SMAPI->MetaFactory(Utils_INTERFACE, &result, &owner));
+    if (current != utils_ || result != META_IFACE_OK || owner != utilsOwner_) return nullptr;
+    return utils_->GetCGameEntitySystem();
+}
+
 void Plugin::AllPluginsLoaded() {
     BindUtils();
     if (!utils_) Log("utils_unavailable");
@@ -205,7 +227,7 @@ bool Plugin::Backend::Ready() const {
 
 int Plugin::Backend::HumanCount() const {
     if (!Ready()) return -1;
-    auto* entities = plugin.utils_->GetCGameEntitySystem();
+    auto* entities = plugin.EntitySystem();
     auto* globals = plugin.engine_->GetServerGlobals();
     if (!entities || !globals || globals->maxClients < 0 || globals->maxClients > ABSOLUTE_PLAYER_LIMIT) return -1;
     // At most 64 controllers, once per configured interval; stop on first
@@ -236,7 +258,7 @@ void Plugin::Backend::Reload(const char* map) {
 }
 
 const char* Plugin::GetLicense() { return "GPLv3"; }
-const char* Plugin::GetVersion() { return "1.1.0-api18 @ " GITHUB_SHA; }
+const char* Plugin::GetVersion() { return "1.1.1-api18 @ " GITHUB_SHA; }
 const char* Plugin::GetDate() { return __DATE__ " " __TIME__; }
 const char* Plugin::GetLogTag() { return "SlowAnimationFix"; }
 const char* Plugin::GetAuthor() { return "Slynx; SVAROG fork"; }

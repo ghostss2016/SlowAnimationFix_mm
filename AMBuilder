@@ -35,7 +35,7 @@ for sdk_target in MMSPlugin.sdk_targets:
 
   # Export only CreateInterface
   if binary.compiler.target.platform == 'linux':
-    binary.compiler.linkflags += ['-Wl,--version-script=' + os.path.join(builder.currentSourcePath, 'ExportMap')]
+    binary.compiler.linkflags += ['-Wl,--no-undefined', '-Wl,--version-script=' + os.path.join(builder.currentSourcePath, 'ExportMap')]
 
   binary.custom = [builder.tools.Protoc(protoc = sdk_target.protoc, sources = [
     # Eiface requires network_connection.pb.h. The checked-in SDK common

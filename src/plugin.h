@@ -19,6 +19,7 @@
 #endif
 
 class IUtilsApi;
+class CGameEntitySystem;
 
 class Plugin final : public ISmmPlugin, public IMetamodListener {
     struct ConVarApi {
@@ -65,6 +66,7 @@ class Plugin final : public ISmmPlugin, public IMetamodListener {
     };
 
 public:
+    CGameEntitySystem* EntitySystem() const;
     bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
     bool Unload(char* error, size_t maxlen) override;
     void AllPluginsLoaded() override;

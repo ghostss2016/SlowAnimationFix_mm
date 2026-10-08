@@ -61,6 +61,7 @@ class Api18SourceContract(unittest.TestCase):
             "/pinned/hl2sdk-cs2/common/network_connection.proto",
             "/pinned/hl2sdk-cs2/common/networkbasetypes.proto",
             "/pinned/hl2sdk-cs2/common/valveextensions.proto"])
+        self.assertIn("-Wl,--no-undefined", binary.compiler.linkflags)
         self.assertEqual(plugin.binaries[0].binary, binary)
         cmake = (ROOT / "CMakeLists.txt").read_text()
         proto_recipe = (ROOT / "makefiles/protobuf.cmake").read_text()
@@ -95,6 +96,25 @@ class Api18SourceContract(unittest.TestCase):
         self.assertIn("utils_->GetCGameEntitySystem()", sources)
         self.assertIn("utilsOwner_ = 0", sources)
         self.assertIn("runtime_.DependencyLost()", sources)
+
+    def test_entity_sdk_accessor_is_module_owned_not_a_cross_plugin_import(self):
+        source = (ROOT / "src/plugin.cpp").read_text()
+        recipe = (ROOT / "AMBuildScript").read_text()
+        for unit in ("entitysystem.cpp", "entityidentity.cpp"):
+            self.assertIn("'" + unit + "'", recipe)
+        self.assertIn("CGameEntitySystem* GameEntitySystem()", source)
+        self.assertIn("return g_Plugin.EntitySystem();", source)
+        self.assertIn("CGameEntitySystem* Plugin::EntitySystem() const", source)
+        self.assertIn("status != SourceMM::Pl_Running", source)
+        self.assertIn("current != utils_", source)
+        self.assertIn("owner != utilsOwner_", source)
+        self.assertIn("auto* entities = plugin.EntitySystem();", source)
+        bridge = source.split("CGameEntitySystem* Plugin::EntitySystem() const", 1)[1].split("void Plugin::AllPluginsLoaded()", 1)[0]
+        self.assertLess(bridge.index("manager->Query"), bridge.index("utils_->GetCGameEntitySystem()"))
+        self.assertLess(bridge.index("current != utils_"), bridge.index("utils_->GetCGameEntitySystem()"))
+        self.assertNotIn("reinterpret_cast", bridge)
+        self.assertNotIn("GetEntityInstance", bridge)
+        self.assertNotIn("FindDeclaredClass", bridge)
 
     def test_schema_checks_and_bounded_tick(self):
         source = (ROOT / "src/plugin.cpp").read_text()
@@ -160,6 +180,7 @@ class Api18SourceContract(unittest.TestCase):
         self.assertIn("addons/metamod", builder.folders)
         self.assertFalse(any(path.startswith("cs2/") for path in builder.folders))
         destinations = {destination for _, destination in builder.copies}
+        self.assertEqual(len(destinations), len(builder.copies), "one package path must have one source")
         for expected in ("addons/slow_animation_fix/slow_animation_fix.so",
                          "addons/slow_animation_fix/slow_animation_fix.ini",
                          "addons/slow_animation_fix/translations/en.ini",
@@ -167,6 +188,17 @@ class Api18SourceContract(unittest.TestCase):
                          "addons/slow_animation_fix/LICENSE"):
             self.assertIn(expected, destinations)
         self.assertTrue(all(path.startswith("addons/") for path in destinations))
+        # Inspect actual producer mappings, not just strings in PackageScript:
+        # native delivery must include these checked-in bytes, not empty files
+        # or a duplicate resource tree under bin/linuxsteamrt64.
+        source_by_destination = {destination: source for source, destination in builder.copies}
+        for asset in (ROOT / "configs").rglob("*"):
+            if not asset.is_file():
+                continue
+            destination = asset.relative_to(ROOT / "configs").as_posix()
+            self.assertEqual(Path(source_by_destination[destination]).resolve(), asset.resolve())
+            self.assertGreater(asset.stat().st_size, 0)
+            self.assertLessEqual(asset.stat().st_size, 65536)
         vdf = builder.outputs["addons/metamod/slow_animation_fix.vdf"]
         self.assertIn(b'"file"\t"addons/slow_animation_fix/slow_animation_fix"', vdf)
 
