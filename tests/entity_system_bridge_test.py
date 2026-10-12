@@ -364,7 +364,7 @@ int main() {
     // Actual scheduler -> actual HumanCount verifies the hot path and bounds:
     // no manager/provider/scan work occurs between configured checks, even
     // after a long pause, and a human prevents a real scheduled reload.
-    assert(g_Plugin.runtime_.Start({1800, 0.1f, "en"}, 0));
+    assert(g_Plugin.runtime_.Start({1800, "en"}, 0));
     g_Plugin.runtime_.MapStart("de_dust2", 0);
     struct RuntimeBackend : Plugin::Backend {
         int reloads = 0;
@@ -387,7 +387,7 @@ int main() {
     g_Plugin.runtime_.Shutdown();
 
     // Exercise actual Runtime cancellation through actual dependency events.
-    const slow_animation::Settings settings{1800, 0.1f, "en"};
+    const slow_animation::Settings settings{1800, "en"};
     assert(g_Plugin.runtime_.Start(settings, 0));
     g_Plugin.runtime_.MapStart("de_dust2", 0);
     struct EmptyEngine {
