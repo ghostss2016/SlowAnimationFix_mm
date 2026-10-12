@@ -11,13 +11,11 @@ namespace slow_animation {
 
 struct Settings {
     double reloadIntervalSeconds = 0;
-    float timelimitFloorMinutes = 0;
     std::string language;
 };
 
 inline bool Valid(const Settings& value) {
     return std::isfinite(value.reloadIntervalSeconds) && value.reloadIntervalSeconds > 0 &&
-        std::isfinite(value.timelimitFloorMinutes) && value.timelimitFloorMinutes > 0 &&
         !value.language.empty() && value.language.size() <= 16 &&
         value.language.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-") == std::string::npos;
 }
@@ -55,14 +53,18 @@ inline bool Number(const std::string& text, double& value) {
 
 inline bool ParseSettings(std::string_view text, Settings& output) {
     std::map<std::string, std::string> entries;
-    if (!ParseEntries(text, entries) || entries.size() != 3 ||
-        !entries.count("reload_interval_seconds") || !entries.count("timelimit_floor_minutes") ||
+    if (!ParseEntries(text, entries) || (entries.size() != 2 && entries.size() != 3) ||
+        !entries.count("reload_interval_seconds") ||
         !entries.count("language")) return false;
     Settings next;
-    double floor = 0;
-    if (!Number(entries.at("reload_interval_seconds"), next.reloadIntervalSeconds) ||
-        !Number(entries.at("timelimit_floor_minutes"), floor)) return false;
-    next.timelimitFloorMinutes = static_cast<float>(floor);
+    if (!Number(entries.at("reload_interval_seconds"), next.reloadIntervalSeconds)) return false;
+    // Accept the formerly shipped key for binary-only updates; it is ignored.
+    // It must never become an engine cvar value or require replacing user config.
+    if (entries.size() == 3) {
+        double unusedFloor = 0;
+        if (!entries.count("timelimit_floor_minutes") ||
+            !Number(entries.at("timelimit_floor_minutes"), unusedFloor) || unusedFloor <= 0) return false;
+    }
     next.language = entries.at("language");
     if (!Valid(next)) return false;
     output = std::move(next);

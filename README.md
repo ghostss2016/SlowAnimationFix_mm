@@ -22,18 +22,11 @@ with no first-frame operating-system uptime jump and no catch-up scan burst.
 GameFrame performs only clock/deadline checks outside those intervals; it does
 not perform filesystem/network access, schema searches or player scans per tick.
 
-For a positive `mp_timelimit`, the remaining minutes are restored on the next
-frame after the expected same-map reload. An elapsed limit uses the configured
-positive floor (0.1 minutes by default). Unlimited maps remain unlimited. Another
-map, another startup generation, dependency unload/pause or plugin unload cancels
-the pending restoration. A rejected map change expires at the next normal check,
-allowing one fresh attempt without multiplying timers.
-
-The `mp_timelimit` reference is constructed only after obtaining `ICvar`, before
-the official `META_CONVAR_REGISTER` call. Its module-local SDK registration is
-rolled back on a later load failure and unregistered before destroying the
-reference on unload. Other modules' registrations and the engine cvar remain
-owned by their providers; there is no static unregistered reference.
+The plugin does not register, read or write `mp_timelimit` or any other gameplay
+cvar. Map/mode settings remain owned by the server configuration and map plugins.
+Empty-server maintenance reloads still run at the configured interval. Their
+normal ChangeLevel config execution is not overridden by the maintenance plugin.
+A rejected map change retries only at the next normal check, without extra timers.
 
 The entity system is borrowed only from `IUtilsApi::GetCGameEntitySystem` during
 a check. The provider's MetaMod owner is tracked and invalidated on unload/pause;
@@ -58,10 +51,11 @@ Settings are actually read at load and map start:
 
 ```ini
 reload_interval_seconds = 1800
-timelimit_floor_minutes = 0.1
 language = ru
 ```
 
+The old `timelimit_floor_minutes` key is accepted but ignored, so a binary-only
+update works with deployed settings without overwriting server configuration.
 A failed configuration/translation reload preserves the last valid state. An
 incomplete first installation fails to load rather than supplying hidden mechanic
 defaults. Schema lookup errors return an invalid layout; negative offsets/null
@@ -80,11 +74,9 @@ the active workflows directory solely for provenance; do not activate it.
 
 `tests/api18_hook_contract_test.py` is a compiler-free policy guard. The native
 `tests/slow_animation_runtime_test.cpp` links the production `src/scheduler.cpp`
-and tests clock/cadence, human/unknown snapshots, remaining timelimit, duplicate
-events, map generations, dependency loss, unload and config/schema safety. It
-also tests the production ConVar owner and read/write boundary: delayed creation,
-registration/cleanup order, failed-load rollback, separate module lifetimes and
-remaining-limit restoration through the registered reference. Run
+and tests clock/cadence, human/unknown snapshots, twelve consecutive same-map
+reloads without cvar writes, duplicate events, dependency loss, unload and
+current/legacy config and schema safety. Its backend has no cvar access methods. Run
 it with ASan/UBSan only through central CI; it does not compile engine hooks or
 prove gameplay/native ABI correctness. Native plugin build and a separately
 authorized game test remain distinct from source guards or package creation.

@@ -1,0 +1,7 @@
+{
+  "sourceRepository": "https://github.com/ghostss2016/SlowAnimationFix_mm.git",
+  "sourceCommit": "1602505723cc7cd80b2b76f0ff6a3a4d3c3fbda3",
+  "sourcePath": "README.md",
+  "sha256": "3ce0932b314576bbe3d921d50eee68b465c4d484f4816b54d217335cd113c89d",
+  "reason": "Preserved before removal of mp_timelimit writes, server19 incident 2026-10-12"
+}

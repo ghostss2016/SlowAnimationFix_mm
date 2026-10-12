@@ -7,9 +7,6 @@
 #include <menus.h> // canonical cs2-utils/include/menus.h, unchanged IUtilsApi ABI
 #include <entitysystem.h>
 #include <IPluginManager.h>
-#include <icvar.h>
-#include <interfaces/interfaces.h>
-#include <tier1/convar.h>
 #include <chrono>
 #include <cstdio>
 
@@ -32,20 +29,6 @@ struct CallbackScope {
     explicit CallbackScope(std::atomic<unsigned>& count) : active(count) { ++active; }
     ~CallbackScope() { --active; }
 };
-}
-
-bool Plugin::ConVarApi::Available() { return g_pCVar != nullptr; }
-
-std::unique_ptr<Plugin::ConVarApi::Reference> Plugin::ConVarApi::Create(const char* name) {
-    return std::make_unique<Reference>(name);
-}
-
-void Plugin::ConVarApi::Register() { META_CONVAR_REGISTER(FCVAR_NONE); }
-
-void Plugin::ConVarApi::Unregister() {
-    // convar.cpp is linked into this hidden/export-mapped module; this cleans
-    // its own registry, not the provider's engine cvar or another plugin's list.
-    ConVar_Unregister();
 }
 
 bool Plugin::ReadFile(const char* path, std::string& output) {
@@ -74,7 +57,7 @@ bool Plugin::ReadConfiguration() {
     const auto translations = "addons/slow_animation_fix/translations/" + next.language + ".ini";
     if (!ReadFile(translations.c_str(), text) || !slow_animation::ParseEntries(text, messages)) return false;
     for (const auto* key : {"config_invalid", "schema_unavailable", "utils_unavailable",
-                           "hooks_unavailable", "cvar_unavailable", "unload_busy", "map_invalid", "reloading", "restoring"})
+                           "hooks_unavailable", "unload_busy", "map_invalid", "reloading"})
         if (!messages.count(key)) return false;
     settings_ = std::move(next);
     messages_ = std::move(messages);
@@ -96,7 +79,6 @@ bool Plugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool) 
     GET_V_IFACE_CURRENT(GetEngineFactory, schema_, ISchemaSystem, SCHEMASYSTEM_INTERFACE_VERSION);
     GET_V_IFACE_CURRENT(GetEngineFactory, network_, INetworkServerService, NETWORKSERVERSERVICE_INTERFACE_VERSION);
     GET_V_IFACE_CURRENT(GetFileSystemFactory, filesystem_, IFileSystem, FILESYSTEM_INTERFACE_VERSION);
-    GET_V_IFACE_CURRENT(GetEngineFactory, g_pCVar, ICvar, CVAR_INTERFACE_VERSION);
     if (!ReadConfiguration()) {
         // Bootstrap diagnostic is the key: no implicit mechanic defaults and
         // no hardcoded fallback language when the package is incomplete.
@@ -105,11 +87,6 @@ bool Plugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool) 
     }
     if (!KHook::__exported__khook) {
         g_SMAPI->Format(error, maxlen, "%s", Message("hooks_unavailable"));
-        return false;
-    }
-    auto convarLoad = timelimit_.RollbackUnlessCommitted();
-    if (!timelimit_.Acquire("mp_timelimit")) {
-        g_SMAPI->Format(error, maxlen, "%s", Message("cvar_unavailable"));
         return false;
     }
     frameHook_ = std::make_unique<FrameHook>(&ISource2Server::GameFrame, this, nullptr, &Plugin::Hook_GameFrame);
@@ -123,7 +100,6 @@ bool Plugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool) 
     runtime_.Start(settings_, WallNow());
     loaded_ = true;
     g_SMAPI->AddListener(this, this);
-    convarLoad.Commit();
     return true;
 }
 
@@ -194,7 +170,7 @@ void Plugin::OnPluginPause(PluginId id) { OnPluginUnload(id); }
 void Plugin::OnPluginUnload(PluginId id) {
     if (id != utilsOwner_ || utilsOwner_ == 0) return;
     // Do not call an unloading provider, retain entity pointers, or leave a
-    // restoration belonging to its previous lifetime queued in our module.
+    // reload belonging to its previous lifetime queued in our module.
     utils_ = nullptr;
     utilsOwner_ = 0;
     runtime_.DependencyLost();
@@ -217,7 +193,6 @@ bool Plugin::Unload(char* error, size_t maxlen) {
     layout_ = {};
     startupHook_.reset();
     frameHook_.reset();
-    timelimit_.Reset();
     return true;
 }
 
@@ -242,15 +217,6 @@ int Plugin::Backend::HumanCount() const {
     return 0;
 }
 
-std::optional<float> Plugin::Backend::Timelimit() const {
-    return slow_animation::ReadTimelimit(plugin.timelimit_);
-}
-
-void Plugin::Backend::RestoreTimelimit(float limit) {
-    if (!slow_animation::WriteTimelimit(plugin.timelimit_, limit)) return;
-    plugin.Log("restoring");
-}
-
 void Plugin::Backend::Reload(const char* map) {
     if (!Ready() || !slow_animation::ValidMap(map)) return;
     plugin.Log("reloading");
@@ -258,7 +224,7 @@ void Plugin::Backend::Reload(const char* map) {
 }
 
 const char* Plugin::GetLicense() { return "GPLv3"; }
-const char* Plugin::GetVersion() { return "1.1.1-api18 @ " GITHUB_SHA; }
+const char* Plugin::GetVersion() { return "1.1.2-api18 @ " GITHUB_SHA; }
 const char* Plugin::GetDate() { return __DATE__ " " __TIME__; }
 const char* Plugin::GetLogTag() { return "SlowAnimationFix"; }
 const char* Plugin::GetAuthor() { return "Slynx; SVAROG fork"; }

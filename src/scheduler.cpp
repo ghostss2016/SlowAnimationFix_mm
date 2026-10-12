@@ -36,43 +36,23 @@ void Runtime::Reconfigure(const slow_animation::Settings& settings) {
 
 void Runtime::Shutdown() {
     running_ = clockStarted_ = awaitingReload_ = false;
-    lastWall_ = now_ = nextCheck_ = mapStart_ = 0;
-    ++generation_;
+    lastWall_ = now_ = nextCheck_ = 0;
     map_.clear();
-    reloadMap_.clear();
-    pendingLimit_.reset();
-    restoreLimit_.reset();
 }
 
 void Runtime::DependencyLost() {
-    ++generation_;
     awaitingReload_ = false;
-    pendingLimit_.reset();
-    restoreLimit_.reset();
-    reloadMap_.clear();
 }
 
 void Runtime::MapStart(const char* map, double wallNow) {
     Advance(wallNow);
-    ++generation_;
-    restoreLimit_.reset();
-    const std::string next = map ? map : "";
-    if (awaitingReload_ && now_ <= nextCheck_ && next == reloadMap_ && pendingLimit_) {
-        restoreLimit_ = pendingLimit_;
-        restoreGeneration_ = generation_;
-    }
     awaitingReload_ = false;
-    pendingLimit_.reset();
-    reloadMap_.clear();
-    map_ = next;
-    mapStart_ = now_;
+    map_ = map ? map : "";
 }
 
 void Runtime::MapShutdown() {
-    ++generation_;
     map_.clear();
-    restoreLimit_.reset();
-    // Keep pendingLimit_ only for our expected self-reload StartupServer.
+    awaitingReload_ = false;
 }
 
 } // namespace scheduler

@@ -136,7 +136,6 @@ int main() {
     assert(plugin.ReadConfiguration());
     assert(plugin.settings_.language == packaged.language);
     assert(plugin.settings_.reloadIntervalSeconds == packaged.reloadIntervalSeconds);
-    assert(plugin.settings_.timelimitFloorMinutes == packaged.timelimitFloorMinutes);
     std::map<std::string, std::string> expectedMessages;
     assert(slow_animation::ParseEntries(fs.files.at(languagePath), expectedMessages));
     assert(plugin.messages_ == expectedMessages);
@@ -173,7 +172,7 @@ int main() {
     plugin.runtime_.MapStart("de_dust2", 0);
     fs.files[configPath] = "reload_interval_seconds=5\ntimelimit_floor_minutes=0.7\nlanguage=en\n";
     assert(plugin.ReadConfiguration());
-    assert(plugin.settings_.reloadIntervalSeconds == 5 && plugin.settings_.timelimitFloorMinutes == 0.7f);
+    assert(plugin.settings_.reloadIntervalSeconds == 5);
     std::map<std::string, std::string> english;
     assert(slow_animation::ParseEntries(fs.files.at("addons/slow_animation_fix/translations/en.ini"), english));
     assert(plugin.messages_ == english && plugin.settings_.language == "en");
@@ -181,8 +180,6 @@ int main() {
         int scans = 0;
         bool Ready() const { return true; }
         int HumanCount() { ++scans; return 1; }
-        std::optional<float> Timelimit() const { assert(false); return {}; }
-        void RestoreTimelimit(float) { assert(false); }
         void Reload(const char*) { assert(false); }
     } backend;
     plugin.runtime_.Frame(4, backend); assert(backend.scans == 0);
@@ -372,8 +369,6 @@ int main() {
     struct RuntimeBackend : Plugin::Backend {
         int reloads = 0;
         explicit RuntimeBackend(Plugin& plugin) : Plugin::Backend{plugin} {}
-        std::optional<float> Timelimit() const { return 60; }
-        void RestoreTimelimit(float) { assert(false); }
         void Reload(const char*) { ++reloads; }
     } scheduled(g_Plugin);
     const int idleQueries = manager.queries, idleProviderCalls = utils.calls, idleReads = first.reads;
@@ -398,8 +393,6 @@ int main() {
     struct EmptyEngine {
         bool Ready() const { return true; }
         int HumanCount() const { return 0; }
-        std::optional<float> Timelimit() const { return 60; }
-        void RestoreTimelimit(float) { assert(false); }
         void Reload(const char*) {}
     } empty;
     g_Plugin.runtime_.Frame(1800, empty);
