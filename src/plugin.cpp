@@ -8,7 +8,7 @@
 #include <const.h>
 #include <vector>
 #include <menus.h> // canonical cs2-utils/include/menus.h, unchanged IUtilsApi ABI
-#include <entitysystem.h>
+#include <gameentitysystem.h>
 #include <IPluginManager.h>
 #include <chrono>
 #include <cstdio>
