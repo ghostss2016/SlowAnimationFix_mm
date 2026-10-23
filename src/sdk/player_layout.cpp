@@ -7,12 +7,12 @@ namespace slow_animation {
 static int Field(CSchemaSystemTypeScope* scope, const char* className, const char* fieldName, int width) {
     if (!scope || !className || !fieldName) return -1;
     const auto* info = scope->FindDeclaredClass(className).Get();
-    if (!info || !info->m_pFields || !info->m_nFieldCount || width <= 0 || info->m_nSize < width) return -1;
-    for (int i = 0; i < info->m_nFieldCount; ++i) {
+    if (!info || !info->m_pFields || !info->m_nNumFields || width <= 0 || info->m_nSizeOf < width) return -1;
+    for (int i = 0; i < info->m_nNumFields; ++i) {
         const auto& field = info->m_pFields[i];
-        if (field.m_pszName && !std::strcmp(field.m_pszName, fieldName)) {
+        if (field.m_pName && !std::strcmp(field.m_pName, fieldName)) {
             const int offset = field.m_nSingleInheritanceOffset;
-            return offset >= 0 && offset <= info->m_nSize - width ? offset : -1;
+            return offset >= 0 && offset <= info->m_nSizeOf - width ? offset : -1;
         }
     }
     return -1;
