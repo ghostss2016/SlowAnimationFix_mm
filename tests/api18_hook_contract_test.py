@@ -104,7 +104,7 @@ class Api18SourceContract(unittest.TestCase):
         self.assertIn("if (!scope)", schema)
         self.assertIn("!info || !info->m_pFields", schema)
         self.assertIn("offset >= 0", schema)
-        self.assertIn("info->m_nSize - width", schema)
+        self.assertIn("info->m_nSizeOf - width", schema)
         frame = source.split("KHook::Return<void> Plugin::Hook_GameFrame(", 1)[1].split(
             "KHook::Return<void> Plugin::Hook_StartupServer(", 1)[0]
         for forbidden in ("ReadConfiguration(", "GetEntityInstance(", "MetaFactory(", "FindDeclaredClass("):
