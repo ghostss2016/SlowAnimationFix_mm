@@ -1,9 +1,12 @@
 #pragma once
 
 #include <ISmmPlugin.h>
-#include <eiface.h>
-#include <iserver.h>
-#include <filesystem.h>
+#include <engine2/ivengineserver2.h>
+#include <engine2/isource2server.h>
+#include <engine2/isource2serverconfig.h>
+#include <engine2/networkgameserverbase.h>
+#include <engine2/inetworkserverservice.h>
+#include <filesystem/ifilesystem.h>
 #include <schemasystem/schemasystem.h>
 #include "metamod_virtual_hook.h"
 #include "scheduler.h"

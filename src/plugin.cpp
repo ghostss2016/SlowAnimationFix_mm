@@ -1,7 +1,10 @@
 // Author: Michal Přikryl (Slynx) <github.com/SlynxCZ>
 // SVAROG fork: official MetaMod API18, checked schema and owned lifecycle.
+#include <engine2/ivengineserver2.h>
+#include <engine2/isource2server.h>
+#include <engine2/inetworkserverservice.h>
 #include "plugin.h"
-#include <variant.h>
+#include <entity2/variant.h>
 #include <const.h>
 #include <vector>
 #include <menus.h> // canonical cs2-utils/include/menus.h, unchanged IUtilsApi ABI
