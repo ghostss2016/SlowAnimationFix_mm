@@ -30,9 +30,6 @@ list(APPEND SOURCE_FILES
     ${SOURCESDK_DIR}/public/tier0/memoverride.cpp
     ${SOURCESDK_DIR}/tier0_perproject/keyvalues3.cpp
     ${SOURCESDK_DIR}/tier0_perproject/convar.cpp
-    ${SOURCESDK_DIR}/entity2/entityidentity.cpp
-    ${SOURCESDK_DIR}/entity2/entitysystem.cpp
-    ${SOURCESDK_DIR}/entity2/entitykeyvalues.cpp
 )
 
 foreach(f ${SOURCE_FILES})
@@ -79,9 +76,3 @@ elseif (WIN32)
 endif()
 
 target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARIES})
-
-add_custom_command(
-    TARGET ${PROJECT_NAME} PRE_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_SOURCE_DIR}/configs ${CMAKE_BINARY_DIR}
-)

@@ -23,9 +23,8 @@ set(CMAKE_STATIC_LIBRARY_PREFIX "")
 set(SOURCESDK ${SOURCESDK_DIR}/${BRANCH})
 set(SOURCESDK_LIB ${SOURCESDK}/lib)
 set(SCHEMA_ROOT "${CMAKE_SOURCE_DIR}/../SchemaEntity" CACHE PATH "Pinned SchemaEntity")
-set(UTILS_ROOT "${CMAKE_SOURCE_DIR}/../cs2-menus-new-fixed" CACHE PATH "Pinned cs2-utils")
-if(NOT EXISTS "${SCHEMA_ROOT}/metamod_virtual_hook.h" OR NOT EXISTS "${UTILS_ROOT}/include/menus.h")
-    message(FATAL_ERROR "Pinned SchemaEntity and cs2-utils headers are required")
+if(NOT EXISTS "${SCHEMA_ROOT}/metamod_virtual_hook.h")
+    message(FATAL_ERROR "Pinned SchemaEntity hook header is required")
 endif()
 
 add_definitions(-DMETA_IS_SOURCE2 -D_ITERATOR_DEBUG_LEVEL=0)
@@ -68,7 +67,6 @@ include_directories(
     ${METAMOD_DIR}/core/sourcehook
     ${METAMOD_DIR}/third_party/khook/include
     ${SCHEMA_ROOT}
-    ${UTILS_ROOT}/include
 )
 
 include(${CMAKE_CURRENT_LIST_DIR}/metamod/configure_metamod.cmake)

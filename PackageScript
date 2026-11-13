@@ -27,7 +27,6 @@ class SDKPackage:
 
     self.addBinFolder(cxx)
     self.generateVDF()
-    self.addFolder('configs')
     builder.AddCopy(os.path.join(builder.sourcePath, 'LICENSE'),
                     os.path.join(self.plugin_folder_path, 'LICENSE'))
 

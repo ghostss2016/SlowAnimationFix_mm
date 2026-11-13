@@ -1,28 +1,21 @@
 #pragma once
-
 #include <ISmmPlugin.h>
 #include <engine2/ivengineserver2.h>
 #include <engine2/isource2server.h>
 #include <engine2/isource2serverconfig.h>
 #include <engine2/networkgameserverbase.h>
 #include <engine2/inetworkserverservice.h>
-#include <filesystem/ifilesystem.h>
-#include <schemasystem/schemasystem.h>
+#include <igameevents.h>
 #include "metamod_virtual_hook.h"
-#include "scheduler.h"
-#include "sdk/player_layout.h"
+#include "restart_scheduler.h"
 #include <atomic>
-#include <map>
 #include <memory>
 
 #if METAMOD_PLAPI_VERSION < 18
 #error SlowAnimationFix requires the official MetaMod plugin API 18 and KHook
 #endif
 
-class IUtilsApi;
-class CGameEntitySystem;
-
-class Plugin final : public ISmmPlugin, public IMetamodListener {
+class Plugin final : public ISmmPlugin, public IMetamodListener, public IGameEventListener2 {
     using FrameHook = SvarogHooks::Virtual<ISource2Server, void, bool, bool, bool>;
     using StartupHook = SvarogHooks::Virtual<INetworkServerService, void,
         const GameSessionConfiguration_t&, ISource2WorldSession*, const char*>;
@@ -32,44 +25,22 @@ class Plugin final : public ISmmPlugin, public IMetamodListener {
     ISource2Server* server_ = nullptr;
     IVEngineServer2* engine_ = nullptr;
     INetworkServerService* network_ = nullptr;
-    IFileSystem* filesystem_ = nullptr;
-    ISchemaSystem* schema_ = nullptr;
-    IUtilsApi* utils_ = nullptr;
-    PluginId utilsOwner_ = 0;
-    scheduler::Runtime runtime_;
-    slow_animation::Settings settings_;
-    slow_animation::PlayerLayout layout_;
-    std::map<std::string, std::string> messages_;
+    IGameEventManager2* events_ = nullptr;
+    restart::Scheduler scheduler_;
+    bool listening_ = false;
     bool loaded_ = false;
 
-    bool ReadConfiguration();
-    bool ReadFile(const char* path, std::string& output);
-    void BindUtils();
     void StartMap(const char* mapName);
-    void Log(const char* key);
-    const char* Message(const char* key) const;
-
-    struct Backend {
-        Plugin& plugin;
-        bool Ready() const;
-        int HumanCount() const;
-        void Reload(const char* map);
-    };
-
+    void StopListening();
 public:
-    CGameEntitySystem* EntitySystem() const;
     bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
     bool Unload(char* error, size_t maxlen) override;
     void AllPluginsLoaded() override;
-    void OnPluginLoad(PluginId id) override;
-    void OnPluginUnload(PluginId id) override;
-    void OnPluginPause(PluginId id) override;
-    void OnPluginUnpause(PluginId id) override;
     void OnLevelShutdown() override;
+    void FireGameEvent(IGameEvent* event) override;
     KHook::Return<void> Hook_GameFrame(ISource2Server*, bool, bool, bool);
     KHook::Return<void> Hook_StartupServer(INetworkServerService*,
         const GameSessionConfiguration_t&, ISource2WorldSession*, const char*);
-
     const char* GetAuthor() override;
     const char* GetName() override;
     const char* GetDescription() override;
