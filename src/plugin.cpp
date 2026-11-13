@@ -23,16 +23,6 @@ bool Plugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool) 
     GET_V_IFACE_CURRENT(GetServerFactory, server_, ISource2Server, INTERFACEVERSION_SERVERGAMEDLL);
     GET_V_IFACE_CURRENT(GetEngineFactory, engine_, IVEngineServer2, SOURCE2ENGINETOSERVER_INTERFACE_VERSION);
     GET_V_IFACE_CURRENT(GetEngineFactory, network_, INetworkServerService, NETWORKSERVERSERVICE_INTERFACE_VERSION);
-    // CS2 does not export GAMEEVENTSMANAGER002 through the engine factory.
-    // Borrow the engine-owned manager from the existing Utils API; no player
-    // or entity-system access is needed by this plugin.
-    int result = META_IFACE_FAILED;
-    auto* utils = static_cast<IUtilsApi*>(g_SMAPI->MetaFactory(Utils_INTERFACE, &result, nullptr));
-    events_ = utils && result == META_IFACE_OK ? utils->GetGameEventManager() : nullptr;
-    if (!events_) {
-        g_SMAPI->Format(error, maxlen, "Utils game-event manager unavailable");
-        return false;
-    }
     if (!KHook::__exported__khook) {
         g_SMAPI->Format(error, maxlen, "MetaMod KHook unavailable");
         return false;
@@ -55,6 +45,24 @@ void Plugin::StopListening() {
     listening_ = false;
 }
 
+void Plugin::StartListening() {
+    if (listening_ || scheduler_.Map().empty()) return;
+    // Utils may load after this plugin. Resolve only at lifecycle boundaries,
+    // after all plugins loaded or at a map startup, never once per frame.
+    if (!events_) {
+        int result = META_IFACE_FAILED;
+        auto* utils = static_cast<IUtilsApi*>(g_SMAPI->MetaFactory(Utils_INTERFACE, &result, nullptr));
+        events_ = utils && result == META_IFACE_OK ? utils->GetGameEventManager() : nullptr;
+    }
+    if (!events_) {
+        META_LOG(this, "Utils game-event manager unavailable; map restart inactive");
+        return;
+    }
+    listening_ = events_->AddListener(this, "round_end", true);
+    if (!listening_) META_LOG(this, "Cannot subscribe to round_end");
+    else META_LOG(this, "Map %s: round_end listener active, restart after 60 minutes", scheduler_.Map().c_str());
+}
+
 void Plugin::StartMap(const char* mapName) {
     StopListening();
     scheduler_.MapStart(mapName, Now());
@@ -62,14 +70,17 @@ void Plugin::StartMap(const char* mapName) {
         META_LOG(this, "Invalid current map name; same-map restart disabled");
         return;
     }
-    listening_ = events_->AddListener(this, "round_end", true);
-    if (!listening_) META_LOG(this, "Cannot subscribe to round_end");
+    StartListening();
 }
 
 void Plugin::AllPluginsLoaded() {
-    if (!loaded_ || !scheduler_.Map().empty()) return;
-    auto* game = network_ ? network_->GetIGameServer() : nullptr;
-    if (game && game->GetMapName()) StartMap(game->GetMapName());
+    if (!loaded_ || listening_) return;
+    if (scheduler_.Map().empty()) {
+        auto* game = network_ ? network_->GetIGameServer() : nullptr;
+        if (game && game->GetMapName()) StartMap(game->GetMapName());
+    } else {
+        StartListening();
+    }
 }
 
 void Plugin::FireGameEvent(IGameEvent* event) {

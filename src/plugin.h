@@ -32,6 +32,7 @@ class Plugin final : public ISmmPlugin, public IMetamodListener, public IGameEve
 
     void StartMap(const char* mapName);
     void StopListening();
+    void StartListening();
 public:
     bool Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool late) override;
     bool Unload(char* error, size_t maxlen) override;
