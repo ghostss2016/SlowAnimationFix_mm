@@ -1,4 +1,5 @@
 #include "plugin.h"
+#include <menus.h>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -22,7 +23,16 @@ bool Plugin::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool) 
     GET_V_IFACE_CURRENT(GetServerFactory, server_, ISource2Server, INTERFACEVERSION_SERVERGAMEDLL);
     GET_V_IFACE_CURRENT(GetEngineFactory, engine_, IVEngineServer2, SOURCE2ENGINETOSERVER_INTERFACE_VERSION);
     GET_V_IFACE_CURRENT(GetEngineFactory, network_, INetworkServerService, NETWORKSERVERSERVICE_INTERFACE_VERSION);
-    GET_V_IFACE_CURRENT(GetEngineFactory, events_, IGameEventManager2, "GAMEEVENTSMANAGER002");
+    // CS2 does not export GAMEEVENTSMANAGER002 through the engine factory.
+    // Borrow the engine-owned manager from the existing Utils API; no player
+    // or entity-system access is needed by this plugin.
+    int result = META_IFACE_FAILED;
+    auto* utils = static_cast<IUtilsApi*>(g_SMAPI->MetaFactory(Utils_INTERFACE, &result, nullptr));
+    events_ = utils && result == META_IFACE_OK ? utils->GetGameEventManager() : nullptr;
+    if (!events_) {
+        g_SMAPI->Format(error, maxlen, "Utils game-event manager unavailable");
+        return false;
+    }
     if (!KHook::__exported__khook) {
         g_SMAPI->Format(error, maxlen, "MetaMod KHook unavailable");
         return false;

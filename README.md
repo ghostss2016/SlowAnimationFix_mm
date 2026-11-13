@@ -4,7 +4,7 @@ This plugin restarts the current CS2 map after it has run for 60 minutes. It wai
 
 The 60-minute clock starts at map startup and resets when the map changes. A single command is sent per map lifetime. The plugin never interrupts a round. If a mode does not emit `round_end`, it leaves the map running. The map name is validated before it is placed in a console command.
 
-The previous empty-server player scan, Utils/Schema player dependency, direct ChangeLevel/Workshop reload path, configuration and translations are no longer part of the build or package. No gameplay cvars are read or changed.
+The previous empty-server player scan, Schema/entity-system dependency, direct ChangeLevel/Workshop reload path, configuration and translations are no longer part of the build or package. The existing Utils API is used only to obtain the engine-owned game-event manager; the plugin does not retain a Utils API pointer. No gameplay cvars are read or changed.
 
 The installed binary and VDF paths remain `addons/slow_animation_fix/slow_animation_fix.so` and `addons/metamod/slow_animation_fix.vdf`.
 

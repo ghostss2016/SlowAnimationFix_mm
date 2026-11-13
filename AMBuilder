@@ -18,6 +18,7 @@ for sdk_target in MMSPlugin.sdk_targets:
 
   binary.compiler.cxxincludes += [
     os.path.join(builder.sourcePath, 'src'),
+    os.path.join(builder.sourcePath, '..', 'cs2-menus-new-fixed', 'include'),
     os.path.join(builder.sourcePath, 'src', 'protobuf'),
     os.path.join(builder.sourcePath, 'src', 'sdk'),
   ]
